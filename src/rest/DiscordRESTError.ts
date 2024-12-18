@@ -1,11 +1,12 @@
-import { ClientRequest, IncomingMessage } from 'http';
+import type { Response } from 'undici';
+import type { Request } from './request';
 
 /** An Discord error from a request. */
 export class DiscordRESTError extends Error {
   /** The client request of the error. */
-  readonly req: ClientRequest;
+  readonly req: Request;
   /** The response from the server. */
-  readonly res: IncomingMessage;
+  readonly res: Response;
   /** The response class from a {@link Server}. */
   readonly response: any;
   /** The error code from the response. */
@@ -18,20 +19,20 @@ export class DiscordRESTError extends Error {
   /**
    * @param req A client request
    * @param res An incoming message from the server
-   * @param response Any {@link Server}s response class
+   * @param response A response's body
    * @param stack The error stack
    */
-  constructor(req: ClientRequest, res: IncomingMessage, response: any, stack: string) {
+  constructor(req: Request, res: Response, response: any, stack: string) {
     super();
 
     this.req = req;
     this.res = res;
     this.response = response;
-    this.code = res.statusCode as number;
+    this.code = res.status;
 
-    let message = response.message || 'Unknown error';
-    if (response.errors) message += '\n  ' + this.flattenErrors(response.errors).join('\n  ');
-    else {
+    let message = response?.message || 'Unknown error';
+    if (response?.errors) message += '\n  ' + this.flattenErrors(response.errors).join('\n  ');
+    else if (response) {
       const errors = this.flattenErrors(response);
       if (errors.length > 0) message += '\n  ' + errors.join('\n  ');
     }
@@ -53,6 +54,12 @@ export class DiscordRESTError extends Error {
     let messages: string[] = [];
     for (const fieldName in errors) {
       if (!(fieldName in errors) || fieldName === 'message' || fieldName === 'code') {
+        continue;
+      }
+      if (fieldName === '_errors') {
+        messages = messages.concat(
+          errors._errors.map((obj: any) => `${keyPrefix ? `${keyPrefix}: ` : ''}${obj.message}`)
+        );
         continue;
       }
       if (errors[fieldName]._errors) {

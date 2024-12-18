@@ -8,6 +8,7 @@ const creator = new SlashCreator({
   applicationID: '12345678901234567',
   publicKey: 'CLIENT_PUBLIC_KEY',
   token: 'BOT_TOKEN_HERE',
+  client
 });
 
 creator
@@ -15,9 +16,11 @@ creator
     new GatewayServer(
       (handler) => client.ws.on('INTERACTION_CREATE', handler)
     )
-  )
-  .registerCommandsIn(path.join(__dirname, 'commands'))
-  .syncCommands();
+  );
+
+await creator.registerCommandsIn(path.join(__dirname, 'commands'));
+
+await creator.syncCommands();
 
 client.login('BOT_TOKEN_HERE');
 ```
@@ -31,6 +34,7 @@ const creator = new SlashCreator({
   applicationID: '12345678901234567',
   publicKey: 'CLIENT_PUBLIC_KEY',
   token: 'BOT_TOKEN_HERE',
+  client
 });
 
 creator
@@ -41,8 +45,10 @@ creator
       })
     )
   )
-  .registerCommandsIn(path.join(__dirname, 'commands'))
-  .syncCommands();
+
+await creator.registerCommandsIn(path.join(__dirname, 'commands'));
+
+await creator.syncCommands();
 
 client.connect();
 ```

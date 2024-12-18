@@ -1,5 +1,13 @@
-import { CDN_URL, Endpoints, ImageFormat, ImageFormats, ImageSizeBoundaries, UserObject } from '../constants';
-import { SlashCreator } from '../creator';
+import {
+  AvatarDecorationData,
+  CDN_URL,
+  Endpoints,
+  ImageFormat,
+  ImageFormats,
+  ImageSizeBoundaries,
+  UserObject
+} from '../constants';
+import { BaseSlashCreator } from '../creator';
 import { UserFlags } from './userFlags';
 
 /** Represents a user on Discord. */
@@ -8,15 +16,19 @@ export class User {
   readonly id: string;
   /** The user's username. */
   readonly username: string;
+  /** The user's display name. */
+  readonly globalName: string | null;
   /** The user's discriminator. */
   readonly discriminator: string;
   /** The user's avatar hash. */
   readonly avatar?: string;
+  /** The user's avatar decoration data. */
+  readonly avatarDecorationData?: AvatarDecorationData;
   /** Whether the user is a bot. */
   readonly bot: boolean;
 
   /** The creator of the user class. */
-  private readonly _creator: SlashCreator;
+  private readonly _creator: BaseSlashCreator;
 
   private _flagsBitfield?: UserFlags;
   private _flags: number;
@@ -25,13 +37,15 @@ export class User {
    * @param data The data for the user
    * @param creator The instantiating creator
    */
-  constructor(data: UserObject, creator: SlashCreator) {
+  constructor(data: UserObject, creator: BaseSlashCreator) {
     this._creator = creator;
 
     this.id = data.id;
     this.username = data.username;
     this.discriminator = data.discriminator;
+    this.globalName = data.global_name;
     if (data.avatar) this.avatar = data.avatar;
+    if (data.avatar_decoration_data) this.avatarDecorationData = data.avatar_decoration_data;
     this._flags = data.public_flags;
     this.bot = data.bot || false;
   }
@@ -54,6 +68,7 @@ export class User {
 
   /** The hash for the default avatar of a user if there is no avatar set. */
   get defaultAvatar() {
+    if (this.discriminator === '0') return Number((BigInt(this.id) >> 22n) % 6n);
     return parseInt(this.discriminator) % 5;
   }
 
@@ -74,13 +89,17 @@ export class User {
    */
   dynamicAvatarURL(format?: ImageFormat, size?: number) {
     if (!this.avatar) return this.defaultAvatarURL;
-    if (!format || !ImageFormats.includes(format.toLowerCase())) {
+    if (!format || !ImageFormats.includes(format.toLowerCase()))
       format = this.avatar.startsWith('a_') ? 'gif' : this._creator.options.defaultImageFormat;
-    }
-    if (!size || size < ImageSizeBoundaries.MINIMUM || size > ImageSizeBoundaries.MAXIMUM || size & (size - 1)) {
+    if (!size || size < ImageSizeBoundaries.MINIMUM || size > ImageSizeBoundaries.MAXIMUM || size & (size - 1))
       size = this._creator.options.defaultImageSize;
-    }
 
     return `${CDN_URL}${Endpoints.USER_AVATAR(this.id, this.avatar)}.${format}?size=${size}`;
+  }
+
+  /** The URL of the user's avatar decoration. */
+  get avatarDecorationURL() {
+    if (!this.avatarDecorationData) return null;
+    return `${CDN_URL}${Endpoints.USER_AVATAR_DECORATION_PRESET(this.avatarDecorationData.asset)}.png`;
   }
 }

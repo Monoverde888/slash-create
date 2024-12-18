@@ -1,38 +1,57 @@
 import {
   ApplicationCommandOption,
-  ApplicationCommandPermissions,
   ApplicationCommandType,
+  ApplicationIntegrationType,
+  EntryPointHandlerType,
+  InteractionContextType,
   PartialApplicationCommand,
   PermissionNames
 } from './constants';
 import { CommandContext } from './structures/interfaces/commandContext';
-import { SlashCreator } from './creator';
+import { BaseSlashCreator } from './creator';
 import { oneLine, validateOptions } from './util';
+import { AutocompleteContext } from './structures/interfaces/autocompleteContext';
+import { Permissions } from './structures/permissions';
 
 /** Represents a Discord slash command. */
-export class SlashCommand {
+export class SlashCommand<T = any> {
   /** The command's name. */
   readonly commandName: string;
+  /** The localiztions for the command name. */
+  nameLocalizations?: Record<string, string>;
   /** The type of command this is. */
   readonly type: ApplicationCommandType;
   /** The command's description. */
   readonly description?: string;
+  /** The localiztions for the command description. */
+  descriptionLocalizations?: Record<string, string>;
   /** The options for the command. */
-  readonly options?: ApplicationCommandOption[];
+  options?: ApplicationCommandOption[];
   /** The guild ID(s) for the command. */
   readonly guildIDs?: string[];
-  /** The permissions required to use this command. */
-  readonly requiredPermissions?: Array<string>;
+  /** The default member permissions required to use the command. */
+  readonly requiredPermissions?: string[];
+  /** Whether to check the member's permission within command execution, regardless of admin-set command permissions. */
+  readonly forcePermissions: boolean;
   /** The throttling options for this command. */
   readonly throttling?: ThrottlingOptions;
   /** Whether this command is used for unknown commands. */
   readonly unknown: boolean;
   /** Whether responses from this command should defer ephemeral messages. */
   readonly deferEphemeral: boolean;
-  /** Whether to enable this command for everyone by default. */
-  readonly defaultPermission: boolean;
-  /** The command permissions per guild. */
-  readonly permissions?: CommandPermissions;
+  /** Whether this command is age-restricted. */
+  readonly nsfw: boolean;
+  /**
+   * Whether to enable this command in direct messages.
+   * @deprecated Use {@link SlashCommand#contexts} instead.
+   */
+  readonly dmPermission: boolean;
+  /** The contexts where this command is available. */
+  readonly integrationTypes: ApplicationIntegrationType[];
+  /** The contexts where this command can be used. */
+  readonly contexts: InteractionContextType[];
+  /** For entry point commands, determines how this command is handled either by the app or Discord */
+  readonly handler?: EntryPointHandlerType;
   /**
    * The file path of the command.
    * Used for refreshing the require cache.
@@ -46,16 +65,16 @@ export class SlashCommand {
   ids = new Map<string, string>();
 
   /** The creator responsible for this command. */
-  readonly creator: SlashCreator;
+  readonly creator: BaseSlashCreator;
 
-  /** Current throttle objects for the command, mapped by user ID. */
+  /** @private */
   private _throttles = new Map<string, ThrottleObject>();
 
   /**
    * @param creator The instantiating creator.
    * @param opts The options for the command.
    */
-  constructor(creator: SlashCreator, opts: SlashCommandOptions) {
+  constructor(creator: BaseSlashCreator, opts: SlashCommandOptions) {
     if (this.constructor.name === 'SlashCommand') throw new Error('The base SlashCommand cannot be instantiated.');
     this.creator = creator;
 
@@ -63,36 +82,80 @@ export class SlashCommand {
 
     this.type = opts.type || ApplicationCommandType.CHAT_INPUT;
     this.commandName = opts.name;
+    if (opts.nameLocalizations) this.nameLocalizations = opts.nameLocalizations;
     if (opts.description) this.description = opts.description;
+    if (opts.descriptionLocalizations) this.descriptionLocalizations = opts.descriptionLocalizations;
     this.options = opts.options;
     if (opts.guildIDs) this.guildIDs = typeof opts.guildIDs == 'string' ? [opts.guildIDs] : opts.guildIDs;
+    if (opts.handler) this.handler = opts.handler;
     this.requiredPermissions = opts.requiredPermissions;
+    this.forcePermissions = typeof opts.forcePermissions === 'boolean' ? opts.forcePermissions : false;
+    this.nsfw = typeof opts.nsfw === 'boolean' ? opts.nsfw : false;
     this.throttling = opts.throttling;
     this.unknown = opts.unknown || false;
     this.deferEphemeral = opts.deferEphemeral || false;
-    this.defaultPermission = typeof opts.defaultPermission === 'boolean' ? opts.defaultPermission : true;
-    if (opts.permissions) this.permissions = opts.permissions;
+    this.contexts = opts.contexts || [];
+    this.integrationTypes = opts.integrationTypes || [ApplicationIntegrationType.GUILD_INSTALL];
+    this.dmPermission =
+      typeof opts.dmPermission === 'boolean'
+        ? opts.dmPermission
+        : this.contexts.length !== 0
+          ? this.contexts.includes(InteractionContextType.BOT_DM)
+          : true;
   }
 
   /**
-   * The JSON for using commands in Discord's API.
-   * @private
+   * The command object serialized into JSON.
+   * @param global Whether the command is global or not.
    */
-  get commandJSON(): PartialApplicationCommand {
-    return this.type === ApplicationCommandType.CHAT_INPUT
-      ? {
-          name: this.commandName,
-          description: this.description,
-          default_permission: this.defaultPermission,
-          type: ApplicationCommandType.CHAT_INPUT,
-          ...(this.options ? { options: this.options } : {})
-        }
-      : {
-          name: this.commandName,
-          description: '',
-          type: this.type,
-          default_permission: this.defaultPermission
-        };
+  toCommandJSON(global = true): PartialApplicationCommand {
+    return {
+      default_member_permissions: this.requiredPermissions
+        ? new Permissions(this.requiredPermissions).valueOf().toString()
+        : null,
+      type: this.type,
+      name: this.commandName,
+      name_localizations: this.nameLocalizations || null,
+      description: this.description || '',
+      description_localizations: this.descriptionLocalizations || null,
+      ...(global
+        ? {
+            dm_permission: this.dmPermission,
+            contexts: this.contexts.length !== 0 ? this.contexts : null,
+            integration_types: this.integrationTypes
+          }
+        : {}),
+      nsfw: this.nsfw,
+      ...(this.type === ApplicationCommandType.CHAT_INPUT
+        ? {
+            ...(this.options
+              ? {
+                  options: this.options.map((o) => ({
+                    ...o,
+                    name_localizations: o.name_localizations || null,
+                    description_localizations: o.description_localizations || null
+                  }))
+                }
+              : {})
+          }
+        : {}),
+      ...(this.type === ApplicationCommandType.ENTRY_POINT
+        ? {
+            handler: this.handler
+          }
+        : {})
+    };
+  }
+
+  /**
+   * Get a string that mentions the command. Retuens null if the ID is not collected.
+   * @param subcommands The subcommands to include in the mention.
+   * @param guild The guild to fetch the ID from.
+   */
+  getMention(subcommands?: string, guild?: string) {
+    const id = this.ids.get(guild || 'global');
+    if (!id) return null;
+    return `</${this.commandName}${subcommands ? ` ${subcommands}` : ''}:${id}>`;
   }
 
   /**
@@ -104,23 +167,28 @@ export class SlashCommand {
     return `${this.type}:${prefix}:${this.commandName}`;
   }
 
+  /** The client passed from the creator */
+  get client(): T {
+    return this.creator.client;
+  }
+
   /**
    * Checks whether the context member has permission to use the command.
    * @param ctx The triggering context
    * @return {boolean|string} Whether the member has permission, or an error message to respond with if they don't
    */
   hasPermission(ctx: CommandContext): boolean | string {
-    if (this.requiredPermissions && ctx.member) {
+    if (this.requiredPermissions && this.forcePermissions && ctx.member) {
       const missing = ctx.member.permissions.missing(this.requiredPermissions);
       if (missing.length > 0) {
         if (missing.length === 1) {
           return `The \`${this.commandName}\` command requires you to have the "${
-            PermissionNames[missing[0]]
+            PermissionNames[missing[0]] || missing[0]
           }" permission.`;
         }
         return oneLine`
           The \`${this.commandName}\` command requires you to have the following permissions:
-          ${missing.map((perm) => PermissionNames[perm]).join(', ')}
+          ${missing.map((perm) => PermissionNames[perm] || perm).join(', ')}
         `;
       }
     }
@@ -140,14 +208,19 @@ export class SlashCommand {
   onBlock(ctx: CommandContext, reason: string, data?: any): any {
     switch (reason) {
       case 'permission': {
-        if (data.response) return ctx.send(data.response, { ephemeral: true });
-        return ctx.send(`You do not have permission to use the \`${this.commandName}\` command.`, { ephemeral: true });
+        if (data.response) return ctx.send({ content: data.response, ephemeral: true });
+        return ctx.send({
+          content: `You do not have permission to use the \`${this.commandName}\` command.`,
+          ephemeral: true
+        });
       }
       case 'throttling': {
-        return ctx.send(
-          `You may not use the \`${this.commandName}\` command again for another ${data.remaining.toFixed(1)} seconds.`,
-          { ephemeral: true }
-        );
+        return ctx.send({
+          content: `You may not use the \`${this.commandName}\` command again for another ${data.remaining.toFixed(
+            1
+          )} seconds.`,
+          ephemeral: true
+        });
       }
       default:
         return null;
@@ -161,8 +234,13 @@ export class SlashCommand {
    */
   onError(err: Error, ctx: CommandContext): any {
     if (!ctx.expired && !ctx.initiallyResponded)
-      return ctx.send('An error occurred while running the command.', { ephemeral: true });
+      return ctx.send({ content: 'An error occurred while running the command.', ephemeral: true });
   }
+
+  /**
+   * Called when the command's localization is requesting to be updated.
+   */
+  onLocaleUpdate(): any {}
 
   /**
    * Called when the command is being unloaded.
@@ -170,33 +248,32 @@ export class SlashCommand {
   onUnload(): any {}
 
   /**
-   * Creates/obtains the throttle object for a user, if necessary.
-   * @param userID ID of the user to throttle for
-   * @private
+   * Called in order to throttle command usages before running.
+   * @param ctx The context being throttled
    */
-  throttle(userID: string): ThrottleObject | null {
+  async throttle(ctx: CommandContext): Promise<ThrottleResult | null> {
     if (!this.throttling) return null;
+    const userID = ctx.user.id;
 
     let throttle = this._throttles.get(userID);
-    if (!throttle) {
+    if (!throttle || throttle.start + this.throttling.duration * 1000 - Date.now() < 0) {
+      if (throttle) clearTimeout(throttle.timeout);
       throttle = {
         start: Date.now(),
         usages: 0,
-        timeout: setTimeout(() => {
-          this._throttles.delete(userID);
-        }, this.throttling.duration * 1000)
+        timeout: setTimeout(() => this._throttles.delete(userID), this.throttling.duration * 1000)
       };
       this._throttles.set(userID, throttle);
     }
 
-    return throttle;
-  }
+    // Return throttle result if the user has been throttled
+    if (throttle.usages + 1 > this.throttling.usages) {
+      const retryAfter = (throttle.start + this.throttling.duration * 1000 - Date.now()) / 1000;
+      return { retryAfter };
+    }
+    throttle.usages++;
 
-  /** Reloads the command. */
-  reload() {
-    if (!this.filePath) throw new Error('Cannot reload a command without a file path defined!');
-    const newCommand = require(this.filePath);
-    this.creator.reregisterCommand(newCommand, this);
+    return null;
   }
 
   /** Unloads the command. */
@@ -211,6 +288,14 @@ export class SlashCommand {
    */
   async run(ctx: CommandContext): Promise<any> { // eslint-disable-line @typescript-eslint/no-unused-vars, prettier/prettier
     throw new Error(`${this.constructor.name} doesn't have a run() method.`);
+  }
+
+  /**
+   * Runs an autocomplete function.
+   * @param ctx The context of the interaction
+   */
+  async autocomplete(ctx: AutocompleteContext): Promise<any> { // eslint-disable-line @typescript-eslint/no-unused-vars, prettier/prettier
+    throw new Error(`${this.constructor.name} doesn't have a autocomplete() method.`);
   }
 
   /**
@@ -256,7 +341,7 @@ export class SlashCommand {
       if (!Array.isArray(opts.requiredPermissions))
         throw new TypeError('Command required permissions must be an Array of permission key strings.');
       for (const perm of opts.requiredPermissions)
-        if (!PermissionNames[perm]) throw new RangeError(`Invalid command required permission: ${perm}`);
+        if (!Permissions.FLAGS[perm]) throw new RangeError(`Invalid command required permission: ${perm}`);
     }
 
     if (opts.throttling) {
@@ -281,12 +366,18 @@ export interface SlashCommandOptions {
   type?: ApplicationCommandType;
   /** The name of the command. */
   name: string;
+  /** The localiztions for the command name. */
+  nameLocalizations?: Record<string, string>;
   /** The description of the command. */
   description?: string;
+  /** The localiztions for the command description. */
+  descriptionLocalizations?: Record<string, string>;
   /** The guild ID(s) that this command will be assigned to. */
   guildIDs?: string | string[];
-  /** The required permission(s) for this command. */
-  requiredPermissions?: Array<string>;
+  /** The default member permissions required to use the command. Use an empty array to resemble a `false` default permission. */
+  requiredPermissions?: string[];
+  /** Whether to check the member's permission within command execution, regardless of admin-set command permissions. */
+  forcePermissions?: boolean;
   /** The command's options. */
   options?: ApplicationCommandOption[];
   /** The throttling options for the command. */
@@ -295,28 +386,19 @@ export interface SlashCommandOptions {
   unknown?: boolean;
   /** Whether responses from this command should defer ephemeral messages. */
   deferEphemeral?: boolean;
-  /** Whether to enable this command for everyone by default. `true` by default. */
-  defaultPermission?: boolean;
-  /** The command permissions per guild */
-  permissions?: CommandPermissions;
-}
-
-/**
- * The command permission for a {@link SlashCommand}.
- * The object is a guild ID mapped to an array of {@link ApplicationCommandPermissions}.
- * @example
- * {
- *   '<guild_id>': [
- *     {
- *       type: ApplicationCommandPermissionType.USER,
- *       id: '<user_id>',
- *       permission: true
- *     }
- *   ]
- * }
- */
-export interface CommandPermissions {
-  [guildID: string]: ApplicationCommandPermissions[];
+  /**
+   * Whether to enable this command in direct messages. `true` by default.
+   * @deprecated Use {@link SlashCommandOptions#contexts} instead.
+   */
+  dmPermission?: boolean;
+  /** Whether this command is age-restricted. `false` by default. */
+  nsfw?: boolean;
+  /** The contexts where this command is available. */
+  integrationTypes?: ApplicationIntegrationType[];
+  /** The contexts where this command can be used. */
+  contexts?: InteractionContextType[];
+  /** For entry point commands, whether to have the application or Discord handle this command. */
+  handler?: EntryPointHandlerType;
 }
 
 /** The throttling options for a {@link SlashCommand}. */
@@ -332,4 +414,12 @@ export interface ThrottleObject {
   start: number;
   usages: number;
   timeout: any;
+}
+
+/** @private */
+export interface ThrottleResult {
+  start?: number;
+  limit?: number;
+  remaining?: number;
+  retryAfter: number;
 }

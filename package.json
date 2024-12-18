@@ -1,10 +1,26 @@
 {
   "name": "slash-create",
-  "version": "4.0.1",
-  "description": "Creator and handler for Discord's slash commands",
+  "version": "6.3.1",
+  "description": "Create and sync Discord slash commands!",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
-  "author": "Snazzah",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./web": {
+      "types": "./lib/web/index.d.ts",
+      "default": "./lib/web/index.js"
+    },
+    "./lib/*.js": "./lib/*.js",
+    "./package.json": "./package.json"
+  },
+  "author": {
+    "name": "Snazzah",
+    "email": "me@snazzah.com",
+    "url": "https://snazzah.com/"
+  },
   "license": "MIT",
   "repository": "https://github.com/Snazzah/slash-create",
   "bugs": {
@@ -21,66 +37,66 @@
     "wrapper"
   ],
   "scripts": {
-    "build": "npx rimraf lib && npx tsc",
-    "build:prepare": "npx shx test -d ./lib || npm run build",
-    "changelog": "npx ts-node scripts/changelog",
-    "docs": "npx typedoc --json .tmp/typedoc-out.json --plugin typedoc-plugin-as-member-of && ts-node scripts/docs",
-    "lint": "npx eslint --ext .ts ./src",
-    "lint:fix": "npx eslint --ext .ts ./src --fix",
-    "test": "npx mocha -r ts-node/register --extension ts 'test/**/*.ts'",
-    "gpr": "npx ts-node scripts/gpr",
-    "prepare": "npx husky install && npm run build:prepare",
-    "prepublishOnly": "(npx shx test -d ./lib || (echo \"lib folder does not exist\" && exit 1)) && npm run lint:fix"
-  },
-  "lint-staged": {
-    "*.ts": "eslint --fix"
+    "build": "rimraf lib && tsc",
+    "build:prepare": "shx test -d ./lib || npm run build",
+    "changelog": "tsx scripts/changelog",
+    "docs": "typedoc --json .tmp/typedoc-out.json --excludeExternals --plugin typedoc-plugin-as-member-of && tsx scripts/docs",
+    "lint": "eslint --ext .ts ./src",
+    "lint:sarif": "eslint --ext .ts ./src -f @microsoft/sarif -o eslint-results.sarif --quiet",
+    "lint:fix": "eslint --ext .ts ./src --fix",
+    "test": "mocha -r tsx --extension ts 'test/**/*.ts'",
+    "gpr": "tsx scripts/gpr",
+    "prepare": "npm run build:prepare",
+    "prepublishOnly": "(shx test -d ./lib || (echo \"lib folder does not exist\" && exit 1)) && npm run lint:fix"
   },
   "funding": {
     "url": "https://github.com/sponsors/Snazzah"
   },
+  "engines": {
+    "node": ">=16"
+  },
   "dependencies": {
-    "@discordjs/collection": "^0.2.1",
-    "eventemitter3": "^4.0.7",
+    "eventemitter3": "^5.0.1",
     "lodash.isequal": "^4.5.0",
-    "lodash.uniq": "^4.5.0",
-    "require-all": "^3.0.0",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "undici": "^5.28.4"
   },
   "devDependencies": {
+    "@microsoft/eslint-formatter-sarif": "^3.0.0",
     "@sinonjs/fake-timers": "6.0.1",
-    "@types/aws-lambda": "^8.10.82",
-    "@types/chai": "^4.2.21",
-    "@types/chai-as-promised": "^7.1.4",
-    "@types/lodash": "^4.14.165",
-    "@types/lodash.isequal": "^4.5.5",
-    "@types/lodash.uniq": "^4.5.6",
-    "@types/mocha": "^9.0.0",
-    "@types/node": "^16.4.14",
-    "@types/require-all": "^3.0.3",
+    "@types/aws-lambda": "^8.10.130",
+    "@types/chai": "^4.3.11",
+    "@types/chai-as-promised": "^7.1.8",
+    "@types/lodash": "^4.14.202",
+    "@types/lodash.isequal": "^4.5.8",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.10.3",
     "@types/sinonjs__fake-timers": "6.0.1",
-    "@typescript-eslint/eslint-plugin": "^4.29.1",
-    "@typescript-eslint/parser": "^4.29.1",
-    "chai": "^4.3.4",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "chai": "^4.3.10",
     "chai-as-promised": "^7.1.1",
     "chai-nock": "^1.3.0",
-    "eslint": "^7.32.0",
-    "eslint-config-prettier": "^8.3.0",
-    "eslint-plugin-prettier": "^3.4.0",
-    "fastify": "^3.20.1",
-    "husky": "^7.0.1",
-    "lint-staged": "^11.1.2",
-    "mocha": "^9.0.3",
-    "nock": "^13.1.1",
-    "prettier": "^2.3.2",
+    "colors": "1.4.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "fastify": "^4.25.2",
+    "mocha": "^10.2.0",
+    "nock": "^13.4.0",
+    "prettier": "^3.1.0",
+    "rimraf": "^5.0.5",
+    "shx": "^0.3.4",
     "ts-docgen": "github:dbots-pkg/ts-docgen#main",
-    "ts-node": "^10.2.0",
+    "tsx": "^4.7.0",
     "typedoc": "0.19.2",
     "typedoc-plugin-as-member-of": "^1.0.2",
-    "typescript": "4.3.5"
+    "typescript": "4.4.2"
   },
   "peerDependencies": {
-    "express": "^4.17.1",
-    "fastify": "^3.9.1"
+    "express": "^4",
+    "fastify": "^3 || ^4"
   },
   "peerDependenciesMeta": {
     "express": {

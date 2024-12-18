@@ -5,6 +5,290 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [6.3.1] - 2024-12-18
+### Added:
+- Added GUILD_MEDIA channel type ([#625](https://github.com/Snazzah/slash-create/pull/625))
+### Fixed:
+- PING requests no longer will use the callback endpoint regardless of the `postCallbacks` option ([#626](https://github.com/Snazzah/slash-create/pull/626))
+- Added a doc link to `CommandContext.options`
+## [6.3.0] - 2024-09-25
+### Changed:
+- POST callbacks will now return responses as `InitialCallbackResponse`, multiple functions can return this instead of a boolean denoting success
+### Added:
+- SlashCreators using webservers can use the `postCallbacks` option to serve 202s to interactions and POST a callback instead
+- Launching activities with `MessageInteractionContext#launchActivity`
+- Entry points
+- `SlashCommand#getMention`
+- `MessageInteractionContext#defer` now supports using any message flags
+- Support for editing message flags
+- Support for sending polls
+- [types] Updated `MessageAttachmentOptions` to support voice message properties
+- Message classes now support the following:
+  - call objects (`call`)
+  - more thread properties (`position` and `thread`)
+  - polls (`poll`)
+  - `activity`
+  - `applicationID`
+  - message snapshots / forwarded messages (`messageSnapshots`)
+  - stickers (`stickerItems`)
+### Fixed:
+- HTTP errors will now properly format request errors
+- Fastify/Express servers should no longer respond early to some interactions
+- `Message#interactionMetadata` parsing has been updated and fixed to include more data
+- [types] Updated AutocompleteChoice to include `name_localizations`
+- [types] Updated MessageAttachment to include `waveform`, `duration_secs`, `flags`, `title`, and `ephemeral`
+- [types] Updated `Message#components` to be an array of any component rather than just action rows (See https://github.com/discord/discord-api-docs/pull/7115)
+## [6.2.1] - 2024-07-21
+### Fixed:
+- Fixed global modal submit handlers causing errors ([#622](https://github.com/Snazzah/slash-create/pull/622))
+## [6.2.0] - 2024-07-15
+### Added:
+- Added Server Context support for servers like Cloudflare Workers ([#621](https://github.com/Snazzah/slash-create/pull/621))
+- Added premium button, deprecating `MessageInteractionContext#promptPremium` ([#618](https://github.com/Snazzah/slash-create/pull/618))
+### Fixed:
+- Updated permission flags and names ([#617](https://github.com/Snazzah/slash-create/pull/617))
+## [6.1.4] - 2024-06-12
+### Changed:
+- Export node util functions `verifyKey` and `getFiles` ([#614](https://github.com/Snazzah/slash-create/pull/614))
+### Fixed:
+- Handle null reponses properly in DiscordRESTError
+- Fix typing for ComponentButton ([#616](https://github.com/Snazzah/slash-create/pull/616))
+- Updated channel permissions description ([#613](https://github.com/Snazzah/slash-create/pull/613))
+## [6.1.3] - 2024-04-24
+### Fixed:
+- Updated `undici` to fix a [low severity CVE (CVE-2024-24758)](https://github.com/advisories/GHSA-3787-6prv-h9w3)
+## [6.1.2] - 2024-04-04
+### Fixed:
+- Added `DANGER` ButtonStyle in accordance to Discord documentation
+- Added the Request object to the `rawREST` event for `SlashCreator`
+## [6.1.1] - 2024-03-30
+### Fixed:
+- Removed a debug log statement ([#608](https://github.com/Snazzah/slash-create/pull/608))
+## [6.1.0] - 2024-03-29
+### Added:
+- Support for user-installable apps ([discord changelog](https://discord.com/developers/docs/change-log#march-18-2024))
+  - Added `SlashCommandOptions#integrationTypes` and `SlashCommandOptions#contexts`
+  - Added `BaseInteraction#authorizingIntegrationOwners` and `BaseInteraction#context`
+  - `Message#interaction` deprecated in favor of `Message#interactionMetadata`
+### Fixed:
+- Added `applied_tags` field to channel structure ([#607](https://github.com/Snazzah/slash-create/pull/607))
+- Use global name in `Member#displayName`
+## [6.0.2] - 2023-12-07
+### Fixed:
+- Fixed some possible issues with verifying responses
+## [6.0.1] - 2023-11-06
+### Fixed:
+- Fixed some types being exported, leading to failed builds
+## [6.0.0] - 2023-11-05
+### Breaking Changes:
+- `SlashCreator#syncCommands` is now an asynchronous function, replacing `#syncCommandsAsync`.
+- All old command permission functions have been removed.
+- Command reregistering has been removed.
+- The request handler has been rewritten to use `undici` using [this PR by @HeadTriXz](https://github.com/projectdysnomia/dysnomia/pull/52).
+- Setting a maximum signature timestamp (`SlashCreatorOptions#maxSignatureTimestamp`) has been removed. This has caused more issues and timestamps are not checked from other implementations of slash commands.
+- The minimum Node version of slash-create is now v16.
+- `SlashCreator#registerCommandsIn` is now async.
+- `SlashCreator#registerCommand` and `SlashCreator#registerCommands` now return the commands that have been registered.
+### Additions:
+- Commands can now use the `throttle()` function which takes a CommandContext and allows you to asynchronously ratelimit users before running the command itself.
+- slash-create now has a web export for built-in Cloudflare Worker compatibility.
+- Support for the Bun runtime with `BunServer`.
+- Added the `USE_EXTERNAL_SOUNDS` permission. (1 << 46)
+### Fixed:
+- **types**: `min_length` and `max_length` to string options now exists
+## [5.14.0] - 2023-09-27
+### Added:
+- Premium Subscription attributes and functions
+  - **BaseInteractionContext**: Added `entitlements`
+  - **MessageInteractionContext**: Added `promptPremium()`
+- **types**: Added `default_value` to select menu types
+## [5.13.0] - 2023-06-07
+### Added:
+- **User**: added support new username system ([#470](https://github.com/Snazzah/slash-create/pull/470))
+### Fixed:
+- **SlashCreator**: Set `syncPermissions` to false by default
+## [5.12.0] - 2023-04-27
+### Changed:
+- **Channel**: Updated channel object to include almost all available channel properties
+- **User**: Supports avatar decoration presets
+- **SlashCreator**: Switch to using protected internal methods ([#419](https://github.com/Snazzah/slash-create/pull/419))
+### Added:
+- **Member**: Add flags property ([#460](https://github.com/Snazzah/slash-create/pull/460))
+- **Permissions**: Added `MANAGE_EVENTS`, `VIEW_CREATOR_MONETIZATION_ANALYTICS`, `USE_SOUNDBOARD`, `SEND_VOICE_MESSAGES` permissions
+- **BaseInteractionContext**: Added `channel` property
+- **Role**: Added `tags` property
+- **Member**: Added `flags` property
+### Fixed:
+- **SlashCreator**: Fix sync guild option being ignored
+- **types**: Fixed GUILD_FORUM enum value ([#415](https://github.com/Snazzah/slash-create/pull/415))
+## [5.11.0] - 2022-12-18
+### Added:
+- **SlashCreator**: Added global modals ([#396](https://github.com/Snazzah/slash-create/pull/396))
+- **SlashCommand**: Added nsfw option
+## [5.10.0] - 2022-10-17
+### Changed:
+- **Context**: Refactored duplicate methods into a single `BaseInteractionContext` ([#384](https://github.com/Snazzah/slash-create/issues/384))
+- **Server**: Deprecated `.use` and `.addMiddleware` and made `app` member public
+- **FastifyServer**: Support for v4
+### Added:
+- **types**: `GUILD_FORUM` and `GUILD_DIRECTORY` to `ChannelType`
+- **types**: Added `USER_SELECT`, `ROLE_SELECT`, `MENTIONABLE_SELECT`, `CHANNEL_SELECT` and renamed `SELECT` to `STRING_SELECT` ([#264](https://github.com/Snazzah/slash-create/issues/264))
+## [5.9.0] - 2022-09-04
+### Changed:
+- **RequestHandler**: Updated API version to v10
+  - This shouldn't change anything when it comes to interaction-specific requests, but be mindful when making manual API requests
+### Added:
+- **MessageInteractionContext**: Editing attachments ([#358](https://github.com/Snazzah/slash-create/pull/358), [#361](https://github.com/Snazzah/slash-create/pull/361))
+- **RequestHandler**: Added ability to send audit log reason in requests
+### Fixed:
+- **types**: Fixed embed types ([#357](https://github.com/Snazzah/slash-create/pull/357))
+## [5.8.0] - 2022-08-17
+### Added:
+- **User**: Avatar Decorations
+  - Note that this isn't even out yet in *canary* but as an experiment, so this may change later or just get removed in general. This change also had some fixes with it and doesn't break anything, so it's there for *whenever* it exists since it is an existing prop in user objects.
+### Fixed:
+- **types**: Fixed option localization types
+- **SlashCreator**: Modal callbacks actually get removed after use
+- **SlashCreator**: Emit `unverifiedRequest` on bad timestamps
+- **MessageInteractionContext**: Options should no longer be modified when used in sending messages
+## [5.7.1] - 2022-07-12
+### Added:
+- **types**: Add types for `min_length` and `max_length`
+### Fixed:
+- **MessageInteractionContext:** Reflect changes on ctx.edit from [a1e2972](https://github.com/Snazzah/slash-create/commit/a1e2972) ([#336](https://github.com/Snazzah/slash-create/pull/336))
+## [5.7.0] - 2022-06-30
+### Added:
+- **MessageInteractionContext & AutocompleteContext:** Added `appPermissions` to all contexts.
+## [5.6.1] - 2022-05-21
+### Fixed:
+- **Permissions:** fixed type mixing in class functions
+## [5.6.0] - 2022-05-16
+### Added:
+- **SlashCreator:** Added `componentTimeouts` option to enable automatic component timeouts.
+### Fixed:
+- **MessageInteractionContext:** Component registry is no longer tied to the expiry of the interaction.
+- **MessageInteractionContext:** The component expiration starts at the time of registering, rather than the time of the interaction.
+## [5.5.3] - 2022-04-29
+### Added:
+- **SlashCommand:** Added `forcePermissions` option to be able to use default permissions while letting admins change permissions via Integrations page
+## [5.5.2] - 2022-04-29
+### Fixed:
+- **SlashCreator:** Fix handling outdated command classes (for slash-up compatibility)
+## [5.5.1] - 2022-04-28
+### Fixed:
+- **Permissions:** Fixed bitfield depending on class name while resolving
+## [5.5.0] - 2022-04-28
+### Changed:
+- **[Command permissions have been deprecated](https://link.snaz.in/sc-cpd)**, including these methods/options:
+  - `SyncCommandOptions#syncPermissions`
+  - `SlashCreator#syncCommandPermissions`
+  - `SlashCommandOptions#permissions`
+  - `SlashCreatorAPI#bulkUpdateCommandPermissions`
+- **SlashCommandOptions:** `#requiredPermissions` now sets member permissions within the command using `default_member_permissions`.
+- **SlashCommand:** `#commandJSON` is now deprecated in favor of `#toCommandJSON`.
+### Added:
+- **Permissions:** New flags: `SEND_MESSAGES_IN_THREADS`, `USE_EMBEDDED_ACTIVITIES`, `MODERATE_MEMBERS`
+- **ApplicationCommandPermissionType:** New type: `CHANNEL = 3`
+- **SlashCommandOptions:** Added `#dmPermission`
+- **SlashCreatorAPI:** Added `withLocalization` option to `#getCommands`
+- **CommandContext:** Initial response attachments support
+### Fixed:
+- Permission names in constants being outdated
+- `SlashCommandOptions#requiredPermissions` option checking
+## [5.4.1] - 2022-03-30
+### Fixed:
+- Fixed syncing erroring for old command classes
+## [5.4.0] - 2022-03-30
+### Added:
+- **ModalInteractionContext:** Added `#data`, `#message`, and `#editParent` ([#263](https://github.com/Snazzah/slash-create/pull/263))
+- **ModalInteractionContext:** Added `#acknowledge` ([#262](https://github.com/Snazzah/slash-create/pull/262))
+- **SlashCommand:** Added command localization ([#270](https://github.com/Snazzah/slash-create/pull/270))
+### Fixed:
+- **Message:** Fixed message mentions not being parsed correctly ([#271](https://github.com/Snazzah/slash-create/issue/271))
+## [5.3.0] - 2022-03-04
+### Added:
+- **SlashCreator:** Added `disableTimeouts` option
+### Fixed:
+- **SlashCreator:** Fixed deep equal checking when syncing
+## [5.2.1] - 2022-02-10
+### Fixed:
+- Fix types for `ApplicationCommandOptionBase` ([#247](https://github.com/Snazzah/slash-create/issue/247))
+## [5.2.0] - 2022-02-09
+### Changed:
+- `ComponentContext` and `CommandContext` now extends off of `ModalSendableContext` rather than just `MessageInteractionContext`. `ModalSendableContext` extends off of `MessageInteractionContext`.
+### Added:
+- **CommandContext:** Attachment options ([#217](https://github.com/Snazzah/slash-create/pull/217))
+- **SlashCreator:** `rawRequest` event ([#245](https://github.com/Snazzah/slash-create/pull/245))
+- Modal Interactions ([#244](https://github.com/Snazzah/slash-create/pull/244))
+## [5.1.0] - 2022-02-04
+### Added:
+- **MessageInteractionContext:** User locale and guild locale ([#216](https://github.com/Snazzah/slash-create/pull/216))
+- **SlashCreator:** Support registering custom file extensions ([#231](https://github.com/Snazzah/slash-create/pull/231))
+## [5.0.3] - 2022-01-10
+### Changed:
+- Replaced the `@discordjs/collection` dependency with a Collection class that has some of the features
+### Fixed:
+- Fixed (potential) bug with parsing allowed mentions, allowing for formatted allowed mentions to be passed in the `formatAllowedMentions` util function
+## [5.0.2] - 2022-01-06
+### Changed:
+- Reverted the `@discordjs/collection` dependency to `0.2.1` to fall into the Node v14 version requirement ([#215](https://github.com/Snazzah/slash-create/pull/215))
+  - This removes the following collection functions: `reverse`, `ensure`, `at` and `keyAt`
+### Added:
+- **types:** Support disabled select menus ([#211](https://github.com/Snazzah/slash-create/pull/211))
+## [5.0.1] - 2021-12-24
+### Fixed:
+- **SlashCreator:** Filter files in `registerCommandsIn`
+- **SlashCreator:** Fixed command invalidation in `reregisterCommand`
+## [5.0.0] - 2021-12-23
+### Breaking Changes:
+- **SlashCreator:** Removed `require-all` dependency and replaced `registerCommandsIn` options to only use strings
+### Added:
+- **SlashCreator:** Add client passthrough option
+### Removed:
+- **types:** Removed `RequireAllOptions` type
+## [4.4.2] - 2021-12-20
+### Changed:
+- Minimum Node Version is now v14
+### Fixed:
+- **SlashCreator:** Fixed command invalidation when registering commands. This should allow for different instances of `slash-create` SlashCommand classes to work.
+## [4.4.1] - 2021-12-19
+### Changed:
+- Replaced the `lodash.uniq` dependency
+### Fixed:
+- **FastifyServer:** Fixed FastifyServer not checking for servers properly in constructor
+- **util:** Fix `oneLine` function
+## [4.4.0] - 2021-12-06
+### Added:
+- **ResolvedMember:** Added guild-specific avatar properties and methods ([#185](https://github.com/Snazzah/slash-create/pull/185))
+- **MessageInteractionContext:** Added wildcard components specification to get all component events from one message ([#188](https://github.com/Snazzah/slash-create/pull/188))
+- **SlashCreator:** Add syncCommandsAsync
+### Fixed:
+- **ComponentContext:** Fixed allowing editing of just components
+## [4.3.1] - 2021-11-14
+### Added:
+- **types:** Added `min_value` and `max_value` types to integer/number options ([#175](https://github.com/Snazzah/slash-create/pull/175))
+## [4.3.0] - 2021-10-09
+### Added:
+- **ApplicationCommandOption:** Add channel type restriction option variant ([#143](https://github.com/Snazzah/slash-create/pull/143))
+- **Role:** Added role icon ([#147](https://github.com/Snazzah/slash-create/pull/147))
+- **SlashCreator:** Added global components ([#145](https://github.com/Snazzah/slash-create/pull/145))
+- **MessageInteractionContext:** Added custom timeout and on expiry functions ([#145](https://github.com/Snazzah/slash-create/pull/145))
+### Fixed:
+- **types:** Add `application_id` to request data ([#146](https://github.com/Snazzah/slash-create/pull/146))
+- **docs:** Fixed some typos ([#153](https://github.com/Snazzah/slash-create/pull/153))
+## [4.2.0] - 2021-09-24
+### Added:
+- Autocomplete function to commands ([#134](https://github.com/Snazzah/slash-create/pull/134))
+### Fixed:
+- Reloading commands clears require cache
+## [4.1.1] - 2021-09-13
+### Fixed:
+- Fixed Vercel Endpoint
+## [4.1.0] - 2021-09-13
+### Added:
+- Support for Vercel ([#121](https://github.com/Snazzah/slash-create/pull/121))
+### Fixed:
+- Channel mentions ([#120](https://github.com/Snazzah/slash-create/pull/120))
 ## [4.0.1] - 2021-08-17
 ### Fixed:
 - Fixed exports from last release
@@ -311,7 +595,7 @@ This release features mostly completed documentation and changes to the packages
 ## [0.1.0] - 2020-12-15
 - Initial release.
 
-[Unreleased]: https://github.com/Snazzah/slash-create/compare/v4.0.1...HEAD
+[Unreleased]: https://github.com/Snazzah/slash-create/compare/v6.3.1...HEAD
 [0.1.0]: https://github.com/Snazzah/slash-create/releases/tag/v0.1.0
 [0.2.0]: https://github.com/Snazzah/slash-create/compare/v0.1.0...v0.2.0
 [1.0.0]: https://github.com/Snazzah/slash-create/compare/v0.2.0...v1.0.0
@@ -343,3 +627,47 @@ This release features mostly completed documentation and changes to the packages
 [3.5.0]: https://github.com/Snazzah/slash-create/compare/v3.4.3...v3.5.0
 [4.0.0]: https://github.com/Snazzah/slash-create/compare/v3.5.0...v4.0.0
 [4.0.1]: https://github.com/Snazzah/slash-create/compare/v4.0.0...v4.0.1
+[4.1.0]: https://github.com/Snazzah/slash-create/compare/v4.0.1...v4.1.0
+[4.1.1]: https://github.com/Snazzah/slash-create/compare/v4.1.0...v4.1.1
+[4.2.0]: https://github.com/Snazzah/slash-create/compare/v4.1.1...v4.2.0
+[4.3.0]: https://github.com/Snazzah/slash-create/compare/v4.2.0...v4.3.0
+[4.3.1]: https://github.com/Snazzah/slash-create/compare/v4.3.0...v4.3.1
+[4.4.0]: https://github.com/Snazzah/slash-create/compare/v4.3.0...v4.4.0
+[4.4.1]: https://github.com/Snazzah/slash-create/compare/v4.4.0...v4.4.1
+[4.4.2]: https://github.com/Snazzah/slash-create/compare/v4.4.1...v4.4.2
+[5.0.0]: https://github.com/Snazzah/slash-create/compare/v4.4.2...v5.0.0
+[5.0.1]: https://github.com/Snazzah/slash-create/compare/v5.0.0...v5.0.1
+[5.0.2]: https://github.com/Snazzah/slash-create/compare/v5.0.1...v5.0.2
+[5.0.3]: https://github.com/Snazzah/slash-create/compare/v5.0.2...v5.0.3
+[5.1.0]: https://github.com/Snazzah/slash-create/compare/v5.0.3...v5.1.0
+[5.2.0]: https://github.com/Snazzah/slash-create/compare/v5.1.0...v5.2.0
+[5.2.1]: https://github.com/Snazzah/slash-create/compare/v5.2.0...v5.2.1
+[5.3.0]: https://github.com/Snazzah/slash-create/compare/v5.2.1...v5.3.0
+[5.4.0]: https://github.com/Snazzah/slash-create/compare/v5.3.0...v5.4.0
+[5.4.1]: https://github.com/Snazzah/slash-create/compare/v5.4.0...v5.4.1
+[5.5.0]: https://github.com/Snazzah/slash-create/compare/v5.4.1...v5.5.0
+[5.5.1]: https://github.com/Snazzah/slash-create/compare/v5.5.0...v5.5.1
+[5.5.2]: https://github.com/Snazzah/slash-create/compare/v5.5.1...v5.5.2
+[5.5.3]: https://github.com/Snazzah/slash-create/compare/v5.5.2...v5.5.3
+[5.6.0]: https://github.com/Snazzah/slash-create/compare/v5.5.3...v5.6.0
+[5.6.1]: https://github.com/Snazzah/slash-create/compare/v5.6.0...v5.6.1
+[5.7.0]: https://github.com/Snazzah/slash-create/compare/v5.6.1...v5.7.0
+[5.7.1]: https://github.com/Snazzah/slash-create/compare/v5.7.0...v5.7.1
+[5.8.0]: https://github.com/Snazzah/slash-create/compare/v5.7.1...v5.8.0
+[5.9.0]: https://github.com/Snazzah/slash-create/compare/v5.8.0...v5.9.0
+[5.10.0]: https://github.com/Snazzah/slash-create/compare/v5.9.0...v5.10.0
+[5.11.0]: https://github.com/Snazzah/slash-create/compare/v5.10.0...v5.11.0
+[5.12.0]: https://github.com/Snazzah/slash-create/compare/v5.11.0...v5.12.0
+[5.14.0]: https://github.com/Snazzah/slash-create/compare/v5.12.0...v5.14.0
+[6.0.0]: https://github.com/Snazzah/slash-create/compare/v5.14.0...v6.0.0
+[6.0.1]: https://github.com/Snazzah/slash-create/compare/v6.0.0...v6.0.1
+[6.0.2]: https://github.com/Snazzah/slash-create/compare/v6.0.1...v6.0.2
+[6.1.0]: https://github.com/Snazzah/slash-create/compare/v6.0.2...v6.1.0
+[6.1.1]: https://github.com/Snazzah/slash-create/compare/v6.1.0...v6.1.1
+[6.1.2]: https://github.com/Snazzah/slash-create/compare/v6.1.1...v6.1.2
+[6.1.3]: https://github.com/Snazzah/slash-create/compare/v6.1.2...v6.1.3
+[6.1.4]: https://github.com/Snazzah/slash-create/compare/v6.1.3...v6.1.4
+[6.2.0]: https://github.com/Snazzah/slash-create/compare/v6.1.4...v6.2.0
+[6.2.1]: https://github.com/Snazzah/slash-create/compare/v6.2.0...v6.2.1
+[6.3.0]: https://github.com/Snazzah/slash-create/compare/v6.2.1...v6.3.0
+[6.3.1]: https://github.com/Snazzah/slash-create/compare/v6.3.0...v6.3.1

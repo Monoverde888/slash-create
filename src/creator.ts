@@ -1,34 +1,33 @@
 import EventEmitter from 'eventemitter3';
-import Collection from '@discordjs/collection';
-import HTTPS from 'https';
-import { formatAllowedMentions, FormattedAllowedMentions, MessageAllowedMentions, oneLine, verifyKey } from './util';
+import { formatAllowedMentions, FormattedAllowedMentions, MessageAllowedMentions, oneLine } from './util';
 import {
   ImageFormat,
   InteractionType,
   AnyRequestData,
   RawRequest,
-  RequireAllOptions,
   InteractionResponseType,
   InteractionResponseFlags,
   PartialApplicationCommand,
   BulkUpdateCommand,
   CommandUser,
   InteractionRequestData,
-  PartialApplicationCommandPermissions,
-  ApplicationCommandType
+  ApplicationCommandType,
+  CommandAutocompleteRequestData
 } from './constants';
 import { SlashCommand } from './command';
 import { TypedEventEmitter } from './util/typedEmitter';
-import { RequestHandler } from './util/requestHandler';
+import { Collection } from './util/collection';
 import { SlashCreatorAPI } from './api';
 import { Server, TransformedRequest, RespondFunction, Response } from './server';
 import { CommandContext } from './structures/interfaces/commandContext';
 import isEqual from 'lodash.isequal';
-import uniq from 'lodash.uniq';
 import { ComponentContext } from './structures/interfaces/componentContext';
+import { AutocompleteContext } from './structures/interfaces/autocompleteContext';
+import { ModalInteractionContext } from './structures/interfaces/modalInteractionContext';
+import { RequestHandler, RESTOptions } from './rest/requestHandler';
 
-/** The main class for using commands and interactions. */
-export class SlashCreator extends (EventEmitter as any as new () => TypedEventEmitter<SlashCreatorEvents>) {
+/** The base class for SlashCreators. */
+export class BaseSlashCreator extends (EventEmitter as any as new () => TypedEventEmitter<SlashCreatorEvents>) {
   /** The options from constructing the creator */
   options: SlashCreatorOptions;
   /** The request handler for the creator */
@@ -37,13 +36,10 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
   readonly api = new SlashCreatorAPI(this);
   /** The commands loaded onto the creator */
   readonly commands = new Collection<string, SlashCommand>();
-  /**
-   * The path where the commands were loaded from
-   * @see #registerCommandsIn
-   */
-  commandsPath?: string;
   /** The server being used in the creator */
   server?: Server;
+  /** The client being passed to this creator */
+  client?: any;
   /** The formatted allowed mentions from the options */
   readonly allowedMentions: FormattedAllowedMentions;
   /** The command to run when an unknown command is used. */
@@ -51,15 +47,18 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
 
   /** @hidden */
   _componentCallbacks = new Map<string, ComponentCallback>();
+  /** @hidden */
+  _modalCallbacks = new Map<string, ModalCallback>();
 
   /** @param opts The options for the creator */
-  constructor(opts: SlashCreatorOptions) {
+  constructor(opts: SlashCreatorOptions, requestHandlerOverrides?: any) {
     // eslint-disable-next-line constructor-super
     super();
 
     if (!opts.applicationID) throw new Error('An application ID must be defined!');
     if (opts.token && !opts.token.startsWith('Bot ') && !opts.token.startsWith('Bearer '))
       opts.token = 'Bot ' + opts.token;
+    this.client = opts.client;
 
     // Define default options
     this.options = Object.assign(
@@ -73,10 +72,12 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
         defaultImageSize: 128,
         unknownCommandResponse: true,
         handleCommandsManually: false,
+        disableTimeouts: false,
+        componentTimeouts: false,
+        postCallbacks: false,
         latencyThreshold: 30000,
         ratelimiterOffset: 0,
         requestTimeout: 15000,
-        maxSignatureTimestamp: 5000,
         endpointPath: '/interactions',
         serverPort: 8030,
         serverHost: 'localhost'
@@ -85,8 +86,11 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
     );
 
     this.allowedMentions = formatAllowedMentions(this.options.allowedMentions as MessageAllowedMentions);
-
-    this.requestHandler = new RequestHandler(this);
+    this.requestHandler = new RequestHandler(this, {
+      ...(this.options.rest ?? {}),
+      token: this.options.token,
+      overrides: requestHandlerOverrides
+    });
     this.api = new SlashCreatorAPI(this);
   }
 
@@ -99,34 +103,37 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
     if (typeof command === 'function') command = new command(this);
     else if (typeof command.default === 'function') command = new command.default(this);
 
-    if (!(command instanceof SlashCommand)) throw new Error(`Invalid command object to register: ${command}`);
+    if (command.creator !== this) throw new Error(`Invalid command object to register: ${command}`);
+    const slashCommand = command as SlashCommand;
 
     // Make sure there aren't any conflicts
-    if (this.commands.some((cmd) => cmd.keyName === command.keyName))
-      throw new Error(`A command with the name "${command.commandName}" (${command.keyName}) is already registered.`);
+    if (this.commands.some((cmd) => cmd.keyName === slashCommand.keyName))
+      throw new Error(
+        `A command with the name "${slashCommand.commandName}" (${slashCommand.keyName}) is already registered.`
+      );
     if (
-      command.guildIDs &&
+      slashCommand.guildIDs &&
       this.commands.some(
         (cmd) =>
           !!(
-            cmd.type === command.type &&
-            cmd.commandName === command.commandName &&
+            cmd.type === slashCommand.type &&
+            cmd.commandName === slashCommand.commandName &&
             cmd.guildIDs &&
-            cmd.guildIDs.map((gid) => command.guildIDs.includes(gid)).includes(true)
+            cmd.guildIDs.some((gid) => slashCommand.guildIDs?.includes(gid))
           )
       )
     )
-      throw new Error(`A command with the name "${command.commandName}" has a conflicting guild ID.`);
+      throw new Error(`A command with the name "${slashCommand.commandName}" has a conflicting guild ID.`);
 
-    if (command.unknown && this.unknownCommand) throw new Error('An unknown command is already registered.');
+    if (slashCommand.unknown && this.unknownCommand) throw new Error('An unknown command is already registered.');
 
-    if (command.unknown) this.unknownCommand = command;
-    else this.commands.set(command.keyName, command);
+    if (slashCommand.unknown) this.unknownCommand = slashCommand;
+    else this.commands.set(slashCommand.keyName, slashCommand);
 
-    this.emit('commandRegister', command, this);
-    this.emit('debug', `Registered command ${command.keyName}.`);
+    this.emit('commandRegister', slashCommand);
+    this.emit('debug', `Registered command ${slashCommand.keyName}.`);
 
-    return this;
+    return slashCommand;
   }
 
   /**
@@ -136,68 +143,33 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
    */
   registerCommands(commands: any[], ignoreInvalid = false) {
     if (!Array.isArray(commands)) throw new TypeError('Commands must be an Array.');
+    const registeredCommands: SlashCommand<this>[] = [];
     for (const command of commands) {
-      const valid =
-        typeof command === 'function' ||
-        typeof command.default === 'function' ||
-        command instanceof SlashCommand ||
-        command.default instanceof SlashCommand;
-      if (ignoreInvalid && !valid) {
-        this.emit('warn', `Attempting to register an invalid command object: ${command}; skipping.`);
-        continue;
+      try {
+        registeredCommands.push(this.registerCommand(command));
+      } catch (e) {
+        if (ignoreInvalid) {
+          this.emit('warn', `Skipped an invalid command: ${e}`);
+          continue;
+        } else throw e;
       }
-      this.registerCommand(command);
     }
-    return this;
+    return registeredCommands;
   }
 
   /**
    * Registers all commands in a directory. The files must export a Command class constructor or instance.
-   * @param options The path to the directory, or a require-all options object
+   * @param commandsPath The path to the command directory
+   * @param extensionsOrFilter An array of custom file extensions (with `.js` and `.cjs` already included) or a function that filters file names
    * @example
-   * const path = require('path');
-   * creator.registerCommandsIn(path.join(__dirname, 'commands'));
+   * await creator.registerCommandsIn(require('path').join(__dirname, 'commands'));
    */
-  registerCommandsIn(options: RequireAllOptions | string) {
-    const obj: { [key: string]: any } = require('require-all')(options);
-    const commands: any[] = [];
-    function iterate(obj: any) {
-      for (const command of Object.values(obj)) {
-        if (typeof command === 'function') commands.push(command);
-        else if (typeof command === 'object') iterate(command);
-      }
-    }
-    iterate(obj);
-    if (typeof options === 'string' && !this.commandsPath) this.commandsPath = options;
-    else if (typeof options === 'object' && !this.commandsPath) this.commandsPath = options.dirname;
-    return this.registerCommands(commands, true);
-  }
-
-  /**
-   * Reregisters a command. (does not support changing name, or guild IDs)
-   * @param command New command
-   * @param oldCommand Old command
-   */
-  reregisterCommand(command: any, oldCommand: SlashCommand) {
-    if (typeof command === 'function') command = new command(this);
-    else if (typeof command.default === 'function') command = new command.default(this);
-
-    if (!(command instanceof SlashCommand)) throw new Error(`Invalid command object to reregister: ${command}`);
-
-    oldCommand.onUnload();
-
-    if (!command.unknown) {
-      if (command.commandName !== oldCommand.commandName) throw new Error('Command name cannot change.');
-      if (!isEqual(command.guildIDs, oldCommand.guildIDs)) throw new Error('Command guild IDs cannot change.');
-      this.commands.set(command.keyName, command);
-    } else if (this.unknownCommand !== oldCommand) {
-      throw new Error('An unknown command is already registered.');
-    } else {
-      this.unknownCommand = command;
-    }
-
-    this.emit('commandReregister', command, oldCommand);
-    this.emit('debug', `Reregistered command ${command.keyName}.`);
+  async registerCommandsIn(
+    commandPath: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    extensionsOrFilter: string[] | FileFilter = []
+  ): Promise<SlashCommand[]> {
+    throw new Error('registerCommandsIn() is not availble in this environment.');
   }
 
   /**
@@ -223,7 +195,7 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
     if (this.server.isWebserver) {
       if (!this.options.publicKey) throw new Error('A public key is required to be set when using a webserver.');
       this.server.createEndpoint(this.options.endpointPath as string, this._onRequest.bind(this));
-    } else this.server.handleInteraction((interaction) => this._onInteraction(interaction, null, false));
+    } else this.server.handleInteraction((interaction) => this._onInteraction(interaction, null, false, null));
 
     return this;
   }
@@ -237,57 +209,44 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
   }
 
   /**
-   * Sync all commands with Discord. This ensures that commands exist when handling them.
+   * Sync all commands to Discord. This ensures that commands exist when handling them.
    * <warn>This requires you to have your token set in the creator config.</warn>
    */
-  syncCommands(opts?: SyncCommandOptions) {
+  async syncCommands(opts?: SyncCommandOptions) {
     const options = Object.assign(
       {
         deleteCommands: true,
         syncGuilds: true,
-        skipGuildErrors: true,
-        syncPermissions: true
+        skipGuildErrors: true
       },
       opts
     ) as SyncCommandOptions;
 
-    const promise = async () => {
-      let guildIDs: string[] = [];
+    let guildIDs: string[] = [];
 
-      // Collect guild IDs with specific commands
-      for (const [, command] of this.commands) {
-        if (command.guildIDs) guildIDs = uniq([...guildIDs, ...command.guildIDs]);
-      }
+    // Collect guild IDs with specific commands
+    for (const [, command] of this.commands) {
+      if (command.guildIDs) guildIDs = [...new Set([...guildIDs, ...command.guildIDs])];
+    }
 
-      await this.syncGlobalCommands(options.deleteCommands);
+    await this.syncGlobalCommands(options.deleteCommands);
 
-      // Sync guild commands
+    // Sync guild commands
+    if (options.syncGuilds) {
       for (const guildID of guildIDs) {
         try {
           await this.syncCommandsIn(guildID, options.deleteCommands);
         } catch (e) {
           if (options.skipGuildErrors) {
-            this.emit('warn', `An error occurred during guild sync (${guildID}): ${e.message}`);
+            this.emit('warn', `An error occurred during guild sync (${guildID}): ${(e as Error).message}`);
           } else {
             throw e;
           }
         }
       }
+    }
 
-      this.emit('debug', 'Finished syncing commands');
-
-      if (options.syncPermissions)
-        try {
-          await this.syncCommandPermissions();
-        } catch (e) {
-          this.emit('error', e);
-        }
-    };
-
-    promise()
-      .then(() => this.emit('synced'))
-      .catch((err) => this.emit('error', err));
-    return this;
+    this.emit('debug', 'Finished syncing commands');
   }
 
   /**
@@ -297,7 +256,7 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
    * @param deleteCommands Whether to delete command not found in the creator
    */
   async syncCommandsIn(guildID: string, deleteCommands = true) {
-    const commands = await this.api.getCommands(guildID);
+    const commands = await this.api.getCommands(guildID, true);
     const handledCommands: string[] = [];
     const updatePayload: BulkUpdateCommand[] = [];
 
@@ -323,9 +282,10 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
           'debug',
           `Found guild command "${applicationCommand.name}" (${applicationCommand.id}, type ${applicationCommand.type}, guild: ${guildID})`
         );
+        if (command.onLocaleUpdate) await command.onLocaleUpdate();
         updatePayload.push({
           id: applicationCommand.id,
-          ...command.commandJSON
+          ...command.toCommandJSON(false)
         });
         handledCommands.push(command.keyName);
       } else if (deleteCommands) {
@@ -352,9 +312,8 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
 
     for (const [, command] of unhandledCommands) {
       this.emit('debug', `Creating guild command "${command.commandName}" (type ${command.type}, guild: ${guildID})`);
-      updatePayload.push({
-        ...command.commandJSON
-      });
+      if (command.onLocaleUpdate) await command.onLocaleUpdate();
+      updatePayload.push(command.toCommandJSON(false));
     }
 
     if (!isEqual(updatePayload, commandsPayload)) {
@@ -376,7 +335,7 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
    * @param deleteCommands Whether to delete command not found in the creator
    */
   async syncGlobalCommands(deleteCommands = true) {
-    const commands = await this.api.getCommands();
+    const commands = await this.api.getCommands(undefined, true);
     const handledCommands: string[] = [];
     const updatePayload: BulkUpdateCommand[] = [];
 
@@ -394,9 +353,10 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
           'debug',
           `Found command "${applicationCommand.name}" (${applicationCommand.id}, type ${applicationCommand.type})`
         );
+        if (command.onLocaleUpdate) await command.onLocaleUpdate();
         updatePayload.push({
           id: applicationCommand.id,
-          ...command.commandJSON
+          ...command.toCommandJSON()
         });
       } else if (deleteCommands) {
         this.emit(
@@ -422,9 +382,8 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
 
     for (const [, command] of unhandledCommands) {
       this.emit('debug', `Creating command "${command.commandName}" (type ${command.type})`);
-      updatePayload.push({
-        ...command.commandJSON
-      });
+      if (command.onLocaleUpdate) await command.onLocaleUpdate();
+      updatePayload.push(command.toCommandJSON());
     }
 
     if (!isEqual(updatePayload, commandsPayload)) {
@@ -440,30 +399,6 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
   }
 
   /**
-   * Sync command permissions.
-   * <warn>This requires you to have your token set in the creator config AND have commands already synced previously.</warn>
-   */
-  async syncCommandPermissions() {
-    const guildPayloads: { [guildID: string]: PartialApplicationCommandPermissions[] } = {};
-
-    for (const [, command] of this.commands) {
-      if (command.permissions) {
-        for (const guildID in command.permissions) {
-          const commandID = command.ids.get(guildID) || command.ids.get('global');
-          if (!commandID) continue;
-          if (!(guildID in guildPayloads)) guildPayloads[guildID] = [];
-          guildPayloads[guildID].push({
-            id: commandID,
-            permissions: command.permissions[guildID]
-          });
-        }
-      }
-    }
-
-    for (const guildID in guildPayloads) await this.api.bulkUpdateCommandPermissions(guildID, guildPayloads[guildID]);
-  }
-
-  /**
    * Updates the command IDs internally in the creator.
    * Use this if you make any changes to commands in the API.
    * @param skipGuildErrors Whether to prevent throwing an error if the API failed to get guild commands
@@ -471,7 +406,7 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
   async collectCommandIDs(skipGuildErrors = true) {
     let guildIDs: string[] = [];
     for (const [, command] of this.commands) {
-      if (command.guildIDs) guildIDs = uniq([...guildIDs, ...command.guildIDs]);
+      if (command.guildIDs) guildIDs = [...new Set([...guildIDs, ...command.guildIDs])];
     }
 
     const commands = await this.api.getCommands();
@@ -509,16 +444,75 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
   }
 
   /**
+   * Registers a global component callback. Note that this will have no expiration, and should be invoked by the returned name.
+   * @param custom_id The custom ID of the component to register
+   * @param callback The callback to use on interaction
+   */
+  registerGlobalComponent(custom_id: string, callback: ComponentRegisterCallback) {
+    const newName = `global-${custom_id}`;
+    if (this._componentCallbacks.has(newName))
+      throw new Error(`A global component with the ID "${newName}" is already registered.`);
+    this._componentCallbacks.set(newName, {
+      callback,
+      expires: undefined,
+      onExpired: undefined
+    });
+  }
+
+  /**
+   * Unregisters a global component callback.
+   * @param custom_id The custom ID of the component to unregister
+   */
+  unregisterGlobalComponent(custom_id: string) {
+    return this._componentCallbacks.delete(`global-${custom_id}`);
+  }
+
+  /**
+   * Registers a global modal callback. Note that this will have no expiration, and should be invoked by the returned name.
+   * @param custom_id The custom ID of the modal to register
+   * @param callback The callback to use on interaction
+   */
+  registerGlobalModal(custom_id: string, callback: ModalRegisterCallback) {
+    const newName = `global-${custom_id}`;
+    if (this._modalCallbacks.has(newName))
+      throw new Error(`A global model with the ID "${newName}" is already registered.`);
+    this._modalCallbacks.set(newName, {
+      callback,
+      expires: undefined,
+      onExpired: undefined
+    });
+  }
+
+  /**
+   * Unregisters a global modal callback.
+   * @param custom_id The custom ID of the component to unregister
+   */
+  unregisterGlobalModal(custom_id: string) {
+    return this._modalCallbacks.delete(`global-${custom_id}`);
+  }
+
+  /**
    * Cleans any awaiting component callbacks from command contexts.
    */
   cleanRegisteredComponents() {
     if (this._componentCallbacks.size)
       for (const [key, callback] of this._componentCallbacks) {
-        if (callback.expires < Date.now()) this._componentCallbacks.delete(key);
+        if (callback.expires != null && callback.expires < Date.now()) {
+          if (callback.onExpired != null) callback.onExpired();
+          this._componentCallbacks.delete(key);
+        }
+      }
+
+    if (this._modalCallbacks.size)
+      for (const [key, callback] of this._modalCallbacks) {
+        if (callback.expires != null && callback.expires < Date.now()) {
+          if (callback.onExpired != null) callback.onExpired();
+          this._modalCallbacks.delete(key);
+        }
       }
   }
 
-  private _getCommandFromInteraction(interaction: InteractionRequestData) {
+  protected _getCommandFromInteraction(interaction: InteractionRequestData | CommandAutocompleteRequestData) {
     return 'guild_id' in interaction
       ? this.commands.find(
           (command) =>
@@ -532,48 +526,55 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
       : this.commands.get(`${interaction.data.type}:global:${interaction.data.name}`);
   }
 
-  private async _onRequest(treq: TransformedRequest, respond: RespondFunction) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  protected async _verify(body: string, signature: string, timestamp: string): Promise<boolean> {
+    throw new Error(`${this.constructor.name} doesn't have a _verify() method.`);
+  }
+
+  protected async _onRequest(treq: TransformedRequest, respond: RespondFunction, context?: unknown) {
     this.emit('debug', 'Got request');
+    this.emit('rawRequest', treq);
 
     // Verify request
     const signature = treq.headers['x-signature-ed25519'] as string;
     const timestamp = treq.headers['x-signature-timestamp'] as string;
 
-    // Check if both signature and timestamp exists, and the timestamp isn't past due.
-    if (
-      !signature ||
-      !timestamp ||
-      parseInt(timestamp) < (Date.now() - (this.options.maxSignatureTimestamp as number)) / 1000
-    )
-      return respond({
-        status: 401,
-        body: 'Invalid signature'
-      });
-
-    const verified = await verifyKey(JSON.stringify(treq.body), signature, timestamp, this.options.publicKey as string);
+    const verified = await this._verify(treq.rawBody || JSON.stringify(treq.body), signature, timestamp);
 
     if (!verified) {
       this.emit('debug', 'A request failed to be verified');
       this.emit('unverifiedRequest', treq);
-      return respond({
+      return void respond({
         status: 401,
         body: 'Invalid signature'
       });
     }
 
     try {
-      await this._onInteraction(treq.body, respond, true);
+      await this._onInteraction(treq.body, respond, true, context);
     } catch (e) {}
   }
 
-  private async _onInteraction(interaction: AnyRequestData, respond: RespondFunction | null, webserverMode: boolean) {
+  protected async _onInteraction(
+    interaction: AnyRequestData,
+    respond: RespondFunction | null,
+    webserverMode: boolean,
+    serverContext: unknown
+  ) {
     this.emit('rawInteraction', interaction);
 
-    if (!respond || !webserverMode) respond = this._createGatewayRespond(interaction.id, interaction.token);
+    // User preferred POSTing callbacks
+    if (this.options.postCallbacks && respond && interaction.type !== InteractionType.PING)
+      await respond({
+        status: 202
+      });
+
+    if (!respond || !webserverMode || (this.options.postCallbacks && interaction.type !== InteractionType.PING))
+      respond = this._createGatewayRespond(interaction.id, interaction.token);
 
     switch (interaction.type) {
       case InteractionType.PING: {
-        this.emit('debug', 'Ping recieved');
+        this.emit('debug', 'Ping received');
         this.emit('ping', interaction.user);
         return respond({
           status: 200,
@@ -582,7 +583,7 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
           }
         });
       }
-      case InteractionType.COMMAND: {
+      case InteractionType.APPLICATION_COMMAND: {
         if (this.options.handleCommandsManually) {
           this.emit('commandInteraction', interaction, respond, webserverMode);
           return;
@@ -603,7 +604,9 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
               interaction,
               respond,
               webserverMode,
-              this.unknownCommand.deferEphemeral
+              this.unknownCommand.deferEphemeral,
+              !this.options.disableTimeouts,
+              serverContext
             );
             return this._runCommand(this.unknownCommand, ctx);
           } else if (this.options.unknownCommandResponse)
@@ -625,7 +628,15 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
               status: 400
             });
         } else {
-          const ctx = new CommandContext(this, interaction, respond, webserverMode, command.deferEphemeral);
+          const ctx = new CommandContext(
+            this,
+            interaction,
+            respond,
+            webserverMode,
+            command.deferEphemeral,
+            !this.options.disableTimeouts,
+            serverContext
+          );
 
           // Ensure the user has permission to use the command
           const hasPermission = command.hasPermission(ctx);
@@ -636,37 +647,41 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
           }
 
           // Throttle the command
-          const throttle = command.throttle(ctx.user.id);
-          if (throttle && command.throttling && throttle.usages + 1 > command.throttling.usages) {
-            const remaining = (throttle.start + command.throttling.duration * 1000 - Date.now()) / 1000;
-            const data = { throttle, remaining };
+          const throttleResult = await command.throttle(ctx);
+          if (throttleResult) {
+            const data = { throttle: throttleResult, remaining: throttleResult.retryAfter };
             this.emit('commandBlock', command, ctx, 'throttling', data);
             return command.onBlock(ctx, 'throttling', data);
           }
 
           // Run the command
-          if (throttle) throttle.usages++;
           return this._runCommand(command, ctx);
         }
       }
       case InteractionType.MESSAGE_COMPONENT: {
         this.emit(
           'debug',
-          `Component request recieved: ${interaction.data.custom_id}, (msg ${interaction.message.id}, ${
+          `Component request received: ${interaction.data.custom_id}, (msg ${interaction.message.id}, ${
             'guild_id' in interaction ? `guild ${interaction.guild_id}` : `user ${interaction.user.id}`
           })`
         );
 
         if (this._componentCallbacks.size || this.listenerCount('componentInteraction') > 0) {
-          const ctx = new ComponentContext(this, interaction, respond);
+          const ctx = new ComponentContext(this, interaction, respond, !this.options.disableTimeouts, serverContext);
           this.emit('componentInteraction', ctx);
 
           this.cleanRegisteredComponents();
 
           const componentCallbackKey = `${ctx.message.id}-${ctx.customID}`;
-          if (this._componentCallbacks.has(componentCallbackKey))
-            this._componentCallbacks.get(componentCallbackKey)!.callback(ctx);
+          const globalCallbackKey = `global-${ctx.customID}`;
+          const wildcardCallbackKey = `${ctx.message.id}-*`;
 
+          if (this._componentCallbacks.has(componentCallbackKey))
+            return this._componentCallbacks.get(componentCallbackKey)!.callback(ctx);
+          if (this._componentCallbacks.has(globalCallbackKey))
+            return this._componentCallbacks.get(globalCallbackKey)!.callback(ctx);
+          if (this._componentCallbacks.has(wildcardCallbackKey))
+            return this._componentCallbacks.get(wildcardCallbackKey)!.callback(ctx);
           break;
         } else
           return respond({
@@ -676,9 +691,66 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
             }
           });
       }
+      case InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE: {
+        const command = this._getCommandFromInteraction(interaction);
+        const ctx = new AutocompleteContext(this, interaction, respond, serverContext);
+        this.emit('autocompleteInteraction', ctx, command);
+
+        if (!command) {
+          this.emit(
+            'debug',
+            `Unknown command autocomplete request: ${interaction.data.name} (${interaction.data.id}, ${
+              'guild_id' in interaction ? `guild ${interaction.guild_id}` : `user ${interaction.user.id}`
+            })`
+          );
+          return respond({
+            status: 400
+          });
+        } else {
+          try {
+            this.emit(
+              'debug',
+              `Running autocomplete function: ${interaction.data.name} (${interaction.data.id}, ${
+                'guild_id' in interaction ? `guild ${interaction.guild_id}` : `user ${interaction.user.id}`
+              })`
+            );
+            const retVal = await command.autocomplete(ctx);
+            if (Array.isArray(retVal) && !ctx.responded) await ctx.sendResults(retVal);
+            return;
+          } catch (err) {
+            return this.emit('error', err as Error);
+          }
+        }
+      }
+      case InteractionType.MODAL_SUBMIT: {
+        try {
+          const ctx = new ModalInteractionContext(
+            this,
+            interaction,
+            respond,
+            !this.options.disableTimeouts,
+            serverContext
+          );
+          this.emit('modalInteraction', ctx);
+
+          this.cleanRegisteredComponents();
+
+          const modalCallbackKey = `${ctx.user.id}-${ctx.customID}`;
+          const globalCallbackKey = `global-${ctx.customID}`;
+          if (this._modalCallbacks.has(modalCallbackKey)) {
+            this._modalCallbacks.get(modalCallbackKey)!.callback(ctx);
+            this._modalCallbacks.delete(modalCallbackKey);
+          } else if (this._modalCallbacks.has(globalCallbackKey)) {
+            this._modalCallbacks.get(globalCallbackKey)!.callback(ctx);
+          }
+          return;
+        } catch (err) {
+          return this.emit('error', err as Error);
+        }
+      }
       default: {
         // @ts-ignore
-        this.emit('debug', `Unknown interaction type recieved: ${interaction.type}`);
+        this.emit('debug', `Unknown interaction type received: ${interaction.type}`);
         this.emit('unknownInteraction', interaction);
         return respond({
           status: 400
@@ -687,7 +759,7 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
     }
   }
 
-  private async _runCommand(command: SlashCommand, ctx: CommandContext) {
+  private async _runCommand<T>(command: SlashCommand, ctx: CommandContext<T>) {
     try {
       this.emit(
         'debug',
@@ -700,26 +772,23 @@ export class SlashCreator extends (EventEmitter as any as new () => TypedEventEm
       const retVal = await promise;
       if (retVal) return command.finalize(retVal, ctx);
     } catch (err) {
-      this.emit('commandError', command, err, ctx);
+      this.emit('commandError', command, err as Error, ctx);
       try {
-        return command.onError(err, ctx);
+        return command.onError(err as Error, ctx);
       } catch (secondErr) {
-        return this.emit('error', secondErr);
+        return this.emit('error', secondErr as Error);
       }
     }
   }
 
   private _createGatewayRespond(interactionID: string, token: string): RespondFunction {
-    return async (response: Response) => {
-      await this.api.interactionCallback(interactionID, token, response.body);
-    };
+    return async (response: Response) =>
+      this.api.interactionCallback(interactionID, token, response.body, response.files, true);
   }
 }
 
-export const Creator = SlashCreator;
-
 /**
- * The events typings for the {@link SlashCreator}.
+ * The events typings for the {@link BaseSlashCreator}.
  * @private
  */
 interface SlashCreatorEvents {
@@ -734,12 +803,15 @@ interface SlashCreatorEvents {
   rawInteraction: (interaction: AnyRequestData) => void;
   commandInteraction: (interaction: InteractionRequestData, respond: RespondFunction, webserverMode: boolean) => void;
   componentInteraction: (ctx: ComponentContext) => void;
-  commandRegister: (command: SlashCommand, creator: SlashCreator) => void;
+  modalInteraction: (ctx: ModalInteractionContext) => void;
+  autocompleteInteraction: (ctx: AutocompleteContext, command?: SlashCommand) => void;
+  commandRegister: (command: SlashCommand) => void;
   commandUnregister: (command: SlashCommand) => void;
   commandReregister: (command: SlashCommand, oldCommand: SlashCommand) => void;
   commandBlock: (command: SlashCommand, ctx: CommandContext, reason: string, data: any) => void;
   commandError: (command: SlashCommand, err: Error, ctx: CommandContext) => void;
   commandRun: (command: SlashCommand, promise: Promise<any>, ctx: CommandContext) => void;
+  rawRequest: (treq: TransformedRequest) => void;
 }
 
 /** The options for the {@link SlashCreator}. */
@@ -772,22 +844,25 @@ export interface SlashCreatorOptions {
    * rather than handle it automatically.
    */
   handleCommandsManually?: boolean;
+  /** Whether to disable automatic defer/acknowledge timeouts. */
+  disableTimeouts?: boolean;
+  /** Whether to enable automatic component timeouts. */
+  componentTimeouts?: boolean;
+  /**
+   * Whether to POST callbacks rather than responding via the webserver.
+   * Webservers will serve an immediate 202 to Discord, and will POST an interaction callback later.
+   */
+  postCallbacks?: boolean;
   /** The default allowed mentions for all messages. */
   allowedMentions?: MessageAllowedMentions;
   /** The default format to provide user avatars in. */
   defaultImageFormat?: ImageFormat;
   /** The default image size to provide user avatars in. */
   defaultImageSize?: number;
-  /** The average latency where SlashCreate will start emitting warnings for. */
-  latencyThreshold?: number;
-  /** A number of milliseconds to offset the ratelimit timing calculations by. */
-  ratelimiterOffset?: number;
-  /** A number of milliseconds before requests are considered timed out. */
-  requestTimeout?: number;
-  /** A number of milliseconds before requests with a timestamp past that time get rejected. */
-  maxSignatureTimestamp?: number;
-  /** A HTTP Agent used to proxy requests */
-  agent?: HTTPS.Agent;
+  /** The options passed to the request handler. */
+  rest?: RESTOptions;
+  /** The client to pass to the creator */
+  client?: any;
 }
 
 /** The options for {@link SlashCreator#syncCommands}. */
@@ -801,15 +876,26 @@ interface SyncCommandOptions {
    * Guild syncs most likely can error if that guild no longer exists.
    */
   skipGuildErrors?: boolean;
-  /** Whether to sync command permissions after syncing commands. */
-  syncPermissions?: boolean;
 }
 
 /** A component callback from {@see MessageInteractionContext#registerComponent}. */
 export type ComponentRegisterCallback = (ctx: ComponentContext) => void;
 
+/** A component callback from {@see ModalSendableContext#sendModal}. */
+export type ModalRegisterCallback = (ctx: ModalInteractionContext) => void;
+
+/** A function to filter files in {@see SlashCreator#registerCommandsIn}. */
+export type FileFilter = (path: string, index: number, array: string[]) => boolean;
+
 /** @hidden */
-interface ComponentCallback {
-  callback: ComponentRegisterCallback;
-  expires: number;
+interface BaseCallback<T> {
+  callback: T;
+  expires?: number;
+  onExpired?: () => void;
 }
+
+/** @hidden */
+interface ComponentCallback extends BaseCallback<ComponentRegisterCallback> {}
+
+/** @hidden */
+interface ModalCallback extends BaseCallback<ModalRegisterCallback> {}

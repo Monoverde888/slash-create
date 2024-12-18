@@ -17,6 +17,8 @@ deploy/
 scripts/
 static/
 docs/
+src/
+eslint-results.sarif
 
 # NPM ignore
 .eslintrc.json
@@ -29,6 +31,7 @@ docs/
 .gitignore
 .github/
 .dependabot/
+.npmrc
 test/
 testing/
 tsconfig.json

@@ -1,13 +1,16 @@
 import {
   ApplicationCommand,
   ApplicationCommandType,
+  CommandAutocompleteRequestData,
   CommandOptionType,
   ComponentType,
   InteractionRequestData,
   InteractionType,
-  MessageComponentRequestData
+  MessageComponentRequestData,
+  ModalSubmitRequestData,
+  TextInputStyle
 } from '../../src/constants';
-import { SlashCreator } from '../../src/creator';
+import { SlashCreator } from '../../src/node/creator';
 import { RespondFunction } from '../../src/server';
 import { MessageData } from '../../src/structures/message';
 
@@ -29,9 +32,11 @@ export const creatorNoToken = new SlashCreator({
 
 export const user = {
   id: '0',
-  username: 'Clyde',
-  discriminator: '0000',
+  username: 'clyde',
+  discriminator: '0',
+  global_name: 'Clyde',
   avatar: null,
+  avatar_decoration_data: null,
   public_flags: 0
 };
 
@@ -75,22 +80,31 @@ export const editedMessage: MessageData = {
 
 export const interactionDefaults: InteractionRequestData = {
   version: 1,
-  type: InteractionType.COMMAND,
+  application_id: '00000000000000000',
+  type: InteractionType.APPLICATION_COMMAND,
   token: MOCK_TOKEN,
   id: '00000000000000000',
   channel_id: '00000000000000000',
   guild_id: '00000000000000000',
+  entitlements: [],
   member: {
     user,
     roles: [],
     premium_since: null,
+    flags: 0,
     permissions: '0',
-    is_pending: false,
     pending: false,
     mute: false,
     deaf: false,
     nick: null,
+    communication_disabled_until: null,
     joined_at: '2021-01-01T21:46:12.072Z'
+  },
+  channel: {
+    type: 1,
+    last_message_id: null,
+    id: '00000000000000000',
+    flags: 0
   },
   data: {
     id: '0',
@@ -110,22 +124,31 @@ export const basicInteraction: InteractionRequestData = {
 
 export const basicMessageInteraction: MessageComponentRequestData = {
   version: 1,
+  application_id: '00000000000000000',
   type: InteractionType.MESSAGE_COMPONENT,
   token: MOCK_TOKEN,
   id: '00000000000000000',
   channel_id: '00000000000000000',
   guild_id: '00000000000000000',
+  entitlements: [],
   member: {
     user,
     roles: [],
+    flags: 0,
     premium_since: null,
     permissions: '0',
-    is_pending: false,
     pending: false,
     mute: false,
     deaf: false,
     nick: null,
+    communication_disabled_until: null,
     joined_at: '2021-01-01T21:46:12.072Z'
+  },
+  channel: {
+    type: 1,
+    last_message_id: null,
+    id: '00000000000000000',
+    flags: 0
   },
   message: followUpMessage,
   data: {
@@ -138,7 +161,7 @@ export const selectMessageInteraction: MessageComponentRequestData = {
   ...basicMessageInteraction,
   data: {
     custom_id: '0',
-    component_type: ComponentType.SELECT,
+    component_type: ComponentType.STRING_SELECT,
     values: ['1', '2']
   }
 };
@@ -232,6 +255,53 @@ export const subCommandOptionsInteraction: InteractionRequestData = {
             name: 'bool',
             type: CommandOptionType.BOOLEAN,
             value: true
+          }
+        ]
+      }
+    ]
+  }
+};
+
+export const autocompleteInteraction: CommandAutocompleteRequestData = {
+  ...interactionDefaults,
+  type: InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE,
+  data: {
+    id: '0',
+    name: 'sub-command-opts',
+    type: ApplicationCommandType.CHAT_INPUT,
+    version: '0',
+    options: [
+      {
+        name: 'sub-command',
+        type: CommandOptionType.SUB_COMMAND,
+        options: [
+          {
+            name: 'string',
+            type: CommandOptionType.STRING,
+            value: 'incomplete str',
+            focused: true
+          }
+        ]
+      }
+    ]
+  }
+};
+
+export const modalInteraction: ModalSubmitRequestData = {
+  ...interactionDefaults,
+  type: InteractionType.MODAL_SUBMIT,
+  data: {
+    custom_id: 'modal',
+    components: [
+      {
+        type: ComponentType.ACTION_ROW,
+        components: [
+          {
+            type: ComponentType.TEXT_INPUT,
+            label: 'text',
+            style: TextInputStyle.SHORT,
+            custom_id: 'text',
+            value: 'hi'
           }
         ]
       }

@@ -1,16 +1,10 @@
 import { RespondFunction } from '../../server';
-import { SlashCreator } from '../../creator';
+import { BaseSlashCreator } from '../../creator';
 import { AnyCommandOption, ApplicationCommandType, InteractionRequestData } from '../../constants';
-import { User } from '../user';
-import Collection from '@discordjs/collection';
-import { Channel } from '../channel';
-import { Role } from '../role';
-import { ResolvedMember } from '../resolvedMember';
-import { MessageInteractionContext } from './messageInteraction';
-import { Message } from '../message';
+import { ModalSendableContext } from './modalSendableContext';
 
 /** Context representing a command interaction. */
-export class CommandContext extends MessageInteractionContext {
+export class CommandContext<ServerContext extends any = unknown> extends ModalSendableContext<ServerContext> {
   /** The full interaction data. */
   readonly data: InteractionRequestData;
 
@@ -22,26 +16,16 @@ export class CommandContext extends MessageInteractionContext {
   readonly commandID: string;
   /** The ID of the target user/message. */
   readonly targetID?: string;
-  /** The options given to the command. */
+  /**
+   * The options given to the command.
+   * @see https://slash-create.js.org/#/docs/main/latest/general/context-options
+   */
   readonly options: { [key: string]: any };
   /** The subcommands the member used in order. */
   readonly subcommands: string[];
 
-  /** The resolved users of the interaction. */
-  readonly users = new Collection<string, User>();
-  /** The resolved members of the interaction. */
-  readonly members = new Collection<string, ResolvedMember>();
-  /** The resolved roles of the interaction. */
-  readonly roles = new Collection<string, Role>();
-  /** The resolved channels of the interaction. */
-  readonly channels = new Collection<string, Channel>();
-  /** The resolved messages of the interaction. */
-  readonly messages = new Collection<string, Message>();
-
   /** Whether the context is from a webserver. */
   private webserverMode: boolean;
-  /** @hidden */
-  private _timeout?: any;
 
   /**
    * @param creator The instantiating creator.
@@ -49,15 +33,18 @@ export class CommandContext extends MessageInteractionContext {
    * @param respond The response function for the interaction.
    * @param webserverMode Whether the interaction was from a webserver.
    * @param deferEphemeral Whether the context should auto-defer ephemeral messages.
+   * @param useTimeout Whether to use the deferral timeout.
    */
   constructor(
-    creator: SlashCreator,
+    creator: BaseSlashCreator,
     data: InteractionRequestData,
     respond: RespondFunction,
     webserverMode: boolean,
-    deferEphemeral = false
+    deferEphemeral = false,
+    useTimeout = true,
+    serverContext: ServerContext
   ) {
-    super(creator, data, respond);
+    super(creator, data, respond, serverContext);
     this.data = data;
     this.webserverMode = webserverMode;
 
@@ -68,34 +55,8 @@ export class CommandContext extends MessageInteractionContext {
     this.options = data.data.options ? CommandContext.convertOptions(data.data.options) : {};
     this.subcommands = data.data.options ? CommandContext.getSubcommandArray(data.data.options) : [];
 
-    if (data.data.resolved) {
-      if (data.data.resolved.users)
-        Object.keys(data.data.resolved.users).forEach((id) =>
-          this.users.set(id, new User(data.data.resolved!.users![id], this.creator))
-        );
-      if (data.data.resolved.members)
-        Object.keys(data.data.resolved.members).forEach((id) =>
-          this.members.set(
-            id,
-            new ResolvedMember(data.data.resolved!.members![id], data.data.resolved!.users![id], this.creator)
-          )
-        );
-      if (data.data.resolved.roles)
-        Object.keys(data.data.resolved.roles).forEach((id) =>
-          this.roles.set(id, new Role(data.data.resolved!.roles![id]))
-        );
-      if (data.data.resolved.channels)
-        Object.keys(data.data.resolved.channels).forEach((id) =>
-          this.channels.set(id, new Channel(data.data.resolved!.channels![id]))
-        );
-      if (data.data.resolved.messages)
-        Object.keys(data.data.resolved.messages).forEach((id) =>
-          this.messages.set(id, new Message(data.data.resolved!.messages![id], this.creator))
-        );
-    }
-
     // Auto-defer if no response was given in 2 seconds
-    this._timeout = setTimeout(() => this.defer(deferEphemeral || false), 2000);
+    if (useTimeout) this._timeout = setTimeout(() => this.defer(deferEphemeral || false), 2000);
   }
 
   /**

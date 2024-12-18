@@ -35,62 +35,92 @@ Use `ctx.editParent` rather than `ctx.editOriginal`.
 await ctx.editParent('You clicked the button!', { components: [] });
 ```
 
+### How do I add file descriptions?
+You can pass an `attachments` array in the message options, allowing you to add a file description. The ID here is the index of the files sent to Discord, if you sent just one file, then that ID would be `0`.
+```js
+await ctx.send({
+  attachments: [
+    {
+      id: 0,
+      description: 'test file'
+    }
+  ],
+  file: {
+    name: 'test.txt',
+    file: Buffer.from('a')
+  }
+});
+```
+
+### How do I edit attachments on a message?
+You can pass an `attachments` array in the message options, allowing you to edit attachments. Without this option, new files sent to Discord are appended to the current message.
+
+For example, this replaces the attachments on the current message to the one being sent. The ID in the attachments array is the index of the files being sent.
+```js
+await ctx.editOriginal({
+  attachments: [
+    {
+      id: 0
+    },
+    {
+      id: 1
+    }
+  ],
+  files: [
+    {
+      name: 'test.txt',
+      file: Buffer.from('a')
+    }, {
+      name: 'test2.txt',
+      file: Buffer.from('b')
+    }
+  ]
+});
+```
+
+To retain a previous attachment, you will need to have the attachment ID and add it to the attachments array. Attachments on Discord are sorted by the time they are uploaded. You cannot edit an existing file's description, but you can add a description to new files.
+
 ## External Libraries
 
 ### How can I get the client from my slash command?
-slash-create does not support passing a client through the command context, since the library is also used for webservers.
-You can do either of the following work-arounds:
-
-#### Extend the Command Class
-This requires you to manually register the command as `registerCommandsIn` will fail with commands with these constructor parameters.
+Starting in version 5.0.0, slash-create allows you to pass a client object to the creator, so command can access the client object.
 ```js
 // bot.js
 const Discord = require('discord.js');
 const { SlashCreator, GatewayServer } = require('slash-create');
-const ClientCommand = require('./commands/command.js');
 
 const client = new Discord.Client({ /* ... */ });
-const creator = new SlashCreator({ /* ... */ });
+const creator = new SlashCreator({
+  client,
+  /* ... */
+});
+
 creator
-    .registerCommand(new ClientCommand(client, creator))
-    // ...
+  .withServer(
+    new GatewayServer(
+      (handler) => client.ws.on('INTERACTION_CREATE', handler)
+    )
+  );
+
+await creator.registerCommandsIn(path.join(__dirname, 'commands'));
+
+// ...
 ```
 ```js
 // commands/command.js
 const { SlashCommand } = require('slash-create');
 
 module.exports = class HelloCommand extends SlashCommand {
-    constructor(client, creator, opts) {
-        super(creator, opts);
-        this.client = client;
-    }
+  constructor(creator) {
+    super(creator, {
+      name: 'hello',
+      description: 'Says hello to you.'
+    });
+  }
 
-    // now you can use this.client ...
-}
-```
-
-#### Putting the Client in the Creator
-This does nothing to the creator, however doing this in TypeScript will result in errors.
-```js
-// bot.js
-const Discord = require('discord.js');
-const { SlashCreator, GatewayServer } = require('slash-create');
-
-const client = new Discord.Client({ /* ... */ });
-const creator = new SlashCreator({ /* ... */ });
-creator.client = client;
-// ...
-```
-```js
-// commands/command.js
-const { SlashCommand, CommandOptionType } = require('slash-create');
-const client = require('../bot.js');
-
-module.exports = class HelloCommand extends SlashCommand {
-  // ...
   async run(ctx) {
-    const client = ctx.creator.client;
-    // do stuff with the client...
+    // this.client ...
+    return 'Hello!',
   }
 }
 ```
@@ -106,9 +136,9 @@ const embed = new Discord.MessageEmbed()
   .setTimestamp()
   .setDescription('Hello');
 
-ctx.send([
+ctx.send({
   embeds: [embed]
-])
+})
 ```
 ```js
 // Embed with files
@@ -116,13 +146,13 @@ const embed = new Discord.MessageEmbed()
   .setTitle('Look at this image')
   .setImage('attachment://coolimage.png');
 
-ctx.send([
+ctx.send({
   embeds: [embed],
   file: {
     name: 'coolimage.png',
     file: fs.readFileSync('coolimage.png')
   }
-])
+})
 ```
 
 ### My bot sent a message but it's still thinking.

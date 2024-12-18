@@ -1,30 +1,24 @@
-import { ComponentActionRow, Endpoints, InteractionResponseFlags, InteractionResponseType } from '../../constants';
-import { SlashCreator, ComponentRegisterCallback } from '../../creator';
+import {
+  AnyComponent,
+  InitialCallbackResponse,
+  InteractionResponseFlags,
+  InteractionResponseType
+} from '../../constants';
+import { BaseSlashCreator, ComponentRegisterCallback } from '../../creator';
 import { RespondFunction } from '../../server';
-import { formatAllowedMentions, FormattedAllowedMentions, MessageAllowedMentions } from '../../util';
-import { Member } from '../member';
-import { User } from '../user';
-import { Message, MessageEmbedOptions } from '../message';
+import {
+  convertCallbackResponse,
+  formatAllowedMentions,
+  FormattedAllowedMentions,
+  MessageAllowedMentions
+} from '../../util';
+import { CreatePollOptions, Message, MessageEmbedOptions } from '../message';
+import { BaseInteractionContext } from './baseInteraction';
 
 /** Represents a interaction context that handles messages. */
-export class MessageInteractionContext {
-  /** The creator of the interaction request. */
-  readonly creator: SlashCreator;
-  /** The interaction's token. */
-  readonly interactionToken: string;
-  /** The interaction's ID. */
-  readonly interactionID: string;
-  /** The channel ID that the interaction was invoked in. */
-  readonly channelID: string;
-  /** The guild ID that the interaction was invoked in. */
-  readonly guildID?: string;
-  /** The member that invoked the interaction. */
-  readonly member?: Member;
-  /** The user that invoked the interaction. */
-  readonly user: User;
-  /** The time when the interaction was created. */
-  readonly invokedAt: number = Date.now();
-
+export class MessageInteractionContext<
+  ServerContext extends any = unknown
+> extends BaseInteractionContext<ServerContext> {
   /** Whether the initial response was sent. */
   initiallyResponded = false;
   /** Whether there is a deferred message available. */
@@ -32,38 +26,30 @@ export class MessageInteractionContext {
   /** The original message ID, automatically set when editing/fetching original message. */
   messageID?: string;
   /** @hidden */
-  private _respond: RespondFunction;
+  protected _respond: RespondFunction;
+  /** @hidden */
+  protected _timeout?: any;
 
   /**
    * @param creator The instantiating creator.
    * @param data The interaction data.
    * @param respond The response function for the interaction.
+   * @param serverContext The context of the server.
    */
-  constructor(creator: SlashCreator, data: any, respond: RespondFunction) {
-    this.creator = creator;
+  constructor(creator: BaseSlashCreator, data: any, respond: RespondFunction, serverContext: ServerContext) {
+    super(creator, data, serverContext);
     this._respond = respond;
-
-    this.interactionToken = data.token;
-    this.interactionID = data.id;
-    this.channelID = data.channel_id;
-    this.guildID = 'guild_id' in data ? data.guild_id : undefined;
-    this.member = 'guild_id' in data ? new Member(data.member, this.creator) : undefined;
-    this.user = new User('guild_id' in data ? data.member.user : data.user, this.creator);
-  }
-
-  /** Whether the interaction has expired. Interactions last 15 minutes. */
-  get expired() {
-    return this.invokedAt + 1000 * 60 * 15 < Date.now();
   }
 
   /**
    * Fetches a message.
    * @param messageID The ID of the message, defaults to the original message
    */
-  async fetch(messageID = '@original') {
-    const data = await this.creator.requestHandler.request(
-      'GET',
-      Endpoints.MESSAGE(this.creator.options.applicationID, this.interactionToken, messageID)
+  async fetch(messageID = '@original'): Promise<Message> {
+    const data = await this.creator.api.fetchInteractionMessage(
+      this.creator.options.applicationID,
+      this.interactionToken,
+      messageID
     );
 
     if (messageID === '@original') this.messageID = data.id;
@@ -73,25 +59,20 @@ export class MessageInteractionContext {
 
   /**
    * Sends a message, if it already made an initial response, this will create a follow-up message.
-   * IF the context has created a deferred message, it will edit that deferred message,
+   * If the context has created a deferred message, it will edit that deferred message,
    * and future calls to this function create follow ups.
-   * This will return a boolean if it's an initial response, otherwise a {@link Message} will be returned.
+   * This will return `true` or a {@link InitialCallbackResponse} if it's an initial response, otherwise a {@link Message} will be returned.
    * Note that when making a follow-up message, the `ephemeral` option is ignored.
    * @param content The content of the message
-   * @param options The message options
+   * @returns `true` or a {@link InitialCallbackResponse} if the initial response passed, otherwise a {@link Message} of the follow-up message.
    */
-  async send(content: string | MessageOptions, options?: MessageOptions): Promise<boolean | Message> {
+  async send(content: string | MessageOptions): Promise<true | InitialCallbackResponse | Message> {
     if (this.expired) throw new Error('This interaction has expired');
 
-    if (typeof content !== 'string') options = content;
-    else if (typeof options !== 'object') options = {};
-
+    const options = typeof content === 'string' ? { content } : content;
     if (typeof options !== 'object') throw new Error('Message options is not an object.');
-
-    if (!options.content && typeof content === 'string') options.content = content;
-
-    if (!options.content && !options.embeds) throw new Error('Message content and embeds are both not given.');
-
+    if (!options.content && !options.embeds && !options.files && !options.poll)
+      throw new Error('No valid options were given.');
     if (options.ephemeral && !options.flags) options.flags = InteractionResponseFlags.EPHEMERAL;
 
     const allowedMentions = options.allowedMentions
@@ -100,9 +81,8 @@ export class MessageInteractionContext {
 
     if (!this.initiallyResponded) {
       this.initiallyResponded = true;
-      // @ts-expect-error
       clearTimeout(this._timeout);
-      await this._respond({
+      const response = await this._respond({
         status: 200,
         body: {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
@@ -112,51 +92,49 @@ export class MessageInteractionContext {
             embeds: options.embeds,
             flags: options.flags,
             allowed_mentions: allowedMentions,
-            components: options.components
+            components: options.components,
+            attachments: options.attachments,
+            poll: options.poll
           }
-        }
+        },
+        files: options.files
       });
-      return true;
-    } else if (this.initiallyResponded && this.deferred) return this.editOriginal(content, options);
-    else return this.sendFollowUp(content, options);
+      return response ? convertCallbackResponse(response, this) : true;
+    } else if (this.initiallyResponded && this.deferred) return this.editOriginal(content);
+    else return this.sendFollowUp(options);
   }
 
   /**
    * Sends a follow-up message.
    * @param content The content of the message
-   * @param options The message options
    */
-  async sendFollowUp(content: string | MessageOptions, options?: MessageOptions): Promise<Message> {
+  async sendFollowUp(content: string | MessageOptions): Promise<Message> {
     if (this.expired) throw new Error('This interaction has expired');
 
-    if (typeof content !== 'string') options = content;
-    else if (typeof options !== 'object') options = {};
-
+    const options = typeof content === 'string' ? { content } : content;
     if (typeof options !== 'object') throw new Error('Message options is not an object.');
-
-    if (!options.content && typeof content === 'string') options.content = content;
-
-    if (!options.content && !options.embeds) throw new Error('Message content and embeds are both not given.');
-
+    if (!options.content && !options.embeds && !options.files && !options.poll)
+      throw new Error('No valid options were given.');
     if (options.ephemeral && !options.flags) options.flags = InteractionResponseFlags.EPHEMERAL;
 
     const allowedMentions = options.allowedMentions
       ? formatAllowedMentions(options.allowedMentions, this.creator.allowedMentions as FormattedAllowedMentions)
       : this.creator.allowedMentions;
 
-    const data = await this.creator.requestHandler.request(
-      'POST',
-      Endpoints.FOLLOWUP_MESSAGE(this.creator.options.applicationID, this.interactionToken),
-      true,
+    const data = await this.creator.api.followUpMessage(
+      this.creator.options.applicationID,
+      this.interactionToken,
       {
         tts: options.tts,
         content: options.content,
         embeds: options.embeds,
         allowed_mentions: allowedMentions,
         components: options.components,
-        flags: options.flags
+        flags: options.flags,
+        attachments: options.attachments,
+        poll: options.poll
       },
-      options.file
+      options.files
     );
     return new Message(data, this.creator, this);
   }
@@ -165,36 +143,40 @@ export class MessageInteractionContext {
    * Edits a message.
    * @param messageID The message's ID
    * @param content The content of the message
-   * @param options The message options
    */
-  async edit(messageID: string, content: string | EditMessageOptions, options?: EditMessageOptions) {
+  async edit(messageID: string, content: string | EditMessageOptions): Promise<Message> {
     if (this.expired) throw new Error('This interaction has expired');
 
-    if (typeof content !== 'string') options = content;
-    else if (typeof options !== 'object') options = {};
-
+    const options = typeof content === 'string' ? { content } : content;
     if (typeof options !== 'object') throw new Error('Message options is not an object.');
-
-    if (!options.content && typeof content === 'string') options.content = content;
-
-    if (!options.content && !options.embeds && !options.allowedMentions)
+    if (
+      !options.content &&
+      !options.embeds &&
+      !options.components &&
+      !options.files &&
+      !options.attachments &&
+      !options.poll
+    )
       throw new Error('No valid options were given.');
 
     const allowedMentions = options.allowedMentions
       ? formatAllowedMentions(options.allowedMentions, this.creator.allowedMentions as FormattedAllowedMentions)
       : this.creator.allowedMentions;
 
-    const data = await this.creator.requestHandler.request(
-      'PATCH',
-      Endpoints.MESSAGE(this.creator.options.applicationID, this.interactionToken, messageID),
-      true,
+    const data = await this.creator.api.updateInteractionMessage(
+      this.creator.options.applicationID,
+      this.interactionToken,
+      messageID,
       {
         content: options.content,
         embeds: options.embeds,
         allowed_mentions: allowedMentions,
-        components: options.components
+        components: options.components,
+        flags: options.flags,
+        attachments: options.attachments,
+        poll: options.poll
       },
-      options.file
+      options.files
     );
     return new Message(data, this.creator, this);
   }
@@ -205,9 +187,9 @@ export class MessageInteractionContext {
    * @param content The content of the message
    * @param options The message options
    */
-  async editOriginal(content: string | EditMessageOptions, options?: EditMessageOptions): Promise<Message> {
+  async editOriginal(content: string | EditMessageOptions): Promise<Message> {
     this.deferred = false;
-    const message = await this.edit('@original', content, options);
+    const message = await this.edit('@original', content);
     this.messageID = message.id;
     return message;
   }
@@ -219,37 +201,87 @@ export class MessageInteractionContext {
   async delete(messageID?: string) {
     if (this.expired) throw new Error('This interaction has expired');
 
-    const res = await this.creator.requestHandler.request(
-      'DELETE',
-      Endpoints.MESSAGE(this.creator.options.applicationID, this.interactionToken, messageID)
+    await this.creator.api.deleteInteractionMessage(
+      this.creator.options.applicationID,
+      this.interactionToken,
+      messageID
     );
 
-    if (!messageID || messageID === '@original') this.messageID = undefined;
-    return res;
+    if (!messageID || messageID === '@original' || messageID === this.messageID) this.messageID = undefined;
   }
 
   /**
    * Creates a deferred message. To users, this will show as
    * "Bot is thinking..." until the deferred message is edited.
-   * @param ephemeral Whether to make the deferred message ephemeral.
-   * @returns Whether the deferred message passed
+   * @param ephemeralOrFlags If its a number, the message flags to use, if a boolean, whether to make the deferred message ephemeral.
+   * @returns Whether the deferred message passed or the callback response if available
    */
-  async defer(ephemeral = false): Promise<boolean> {
+  async defer(ephemeralOrFlags: number | boolean = 0): Promise<boolean | InitialCallbackResponse> {
+    const flags =
+      typeof ephemeralOrFlags === 'boolean'
+        ? ephemeralOrFlags
+          ? InteractionResponseFlags.EPHEMERAL
+          : 0
+        : ephemeralOrFlags;
     if (!this.initiallyResponded && !this.deferred) {
       this.initiallyResponded = true;
       this.deferred = true;
-      // @ts-expect-error
       clearTimeout(this._timeout);
-      await this._respond({
+      const response = await this._respond({
         status: 200,
         body: {
           type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            flags: ephemeral ? InteractionResponseFlags.EPHEMERAL : 0
+            flags
           }
         }
       });
-      return true;
+      return response ? convertCallbackResponse(response, this) : true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Creates a message that prompts the user for a premium subscription.
+   * @returns Whether the message passed or the callback response if available
+   * @deprecated Use `ComponentButtonPremium` instead.
+   */
+  async promptPremium(): Promise<boolean | InitialCallbackResponse> {
+    if (!this.initiallyResponded && !this.deferred) {
+      this.initiallyResponded = true;
+      this.deferred = true;
+      clearTimeout(this._timeout);
+      const response = await this._respond({
+        status: 200,
+        body: {
+          type: InteractionResponseType.PREMIUM_REQUIRED,
+          data: {}
+        }
+      });
+      return response ? convertCallbackResponse(response, this) : true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Launches the activity this app is associated with.
+   * @returns Whether the message passed or the callback response if available
+   */
+  async launchActivity(): Promise<boolean | InitialCallbackResponse> {
+    if (!this.initiallyResponded && !this.deferred) {
+      this.initiallyResponded = true;
+      this.deferred = true;
+      clearTimeout(this._timeout);
+      const response = await this._respond({
+        status: 200,
+        body: {
+          type: InteractionResponseType.LAUNCH_ACTIVITY,
+          data: {}
+        }
+      });
+      return response ? convertCallbackResponse(response, this) : true;
     }
 
     return false;
@@ -260,9 +292,15 @@ export class MessageInteractionContext {
    * This unregisters automatically when the context expires.
    * @param custom_id The custom ID of the component to register
    * @param callback The callback to use on interaction
+   * @param expiration The expiration time of the callback in milliseconds. Use null for no expiration (Although, in this case, global components might be more consistent).
+   * @param onExpired A function to be called when the component expires.
    */
-  registerComponent(custom_id: string, callback: ComponentRegisterCallback) {
-    if (this.expired) throw new Error('This interaction has expired');
+  registerComponent(
+    custom_id: string,
+    callback: ComponentRegisterCallback,
+    expiration: number = 1000 * 60 * 15,
+    onExpired?: () => void
+  ) {
     if (!this.initiallyResponded || this.deferred)
       throw new Error('You must send a message before registering components');
     if (!this.messageID)
@@ -270,8 +308,17 @@ export class MessageInteractionContext {
 
     this.creator._componentCallbacks.set(`${this.messageID}-${custom_id}`, {
       callback,
-      expires: this.invokedAt + 1000 * 60 * 15
+      expires: expiration != null ? Date.now() + expiration : undefined,
+      onExpired
     });
+
+    if (expiration != null && this.creator.options.componentTimeouts)
+      setTimeout(() => {
+        if (this.creator._componentCallbacks.has(`${this.messageID}-${custom_id}`)) {
+          if (onExpired) onExpired();
+          this.creator._componentCallbacks.delete(`${this.messageID}-${custom_id}`);
+        }
+      }, expiration);
   }
 
   /**
@@ -280,16 +327,29 @@ export class MessageInteractionContext {
    * @param message_id The message ID of the component to register
    * @param custom_id The custom ID of the component to register
    * @param callback The callback to use on interaction
+   * @param expiration The expiration time of the callback in milliseconds. Use null for no expiration (Although, in this case, global components might be more consistent).
+   * @param onExpired A function to be called when the component expires.
    */
-  registerComponentFrom(message_id: string, custom_id: string, callback: ComponentRegisterCallback) {
-    if (this.expired) throw new Error('This interaction has expired');
-    if (!this.initiallyResponded || this.deferred)
-      throw new Error('You must send a message before registering components');
-
+  registerComponentFrom(
+    message_id: string,
+    custom_id: string,
+    callback: ComponentRegisterCallback,
+    expiration: number = 1000 * 60 * 15,
+    onExpired?: () => void
+  ) {
     this.creator._componentCallbacks.set(`${message_id}-${custom_id}`, {
       callback,
-      expires: this.invokedAt + 1000 * 60 * 15
+      expires: expiration != null ? Date.now() + expiration : undefined,
+      onExpired
     });
+
+    if (expiration != null && this.creator.options.componentTimeouts)
+      setTimeout(() => {
+        if (this.creator._componentCallbacks.has(`${message_id}-${custom_id}`)) {
+          if (onExpired) onExpired();
+          this.creator._componentCallbacks.delete(`${message_id}-${custom_id}`);
+        }
+      }, expiration);
   }
 
   /**
@@ -304,6 +364,45 @@ export class MessageInteractionContext {
     }
     return this.creator._componentCallbacks.delete(`${message_id}-${custom_id}`);
   }
+
+  /**
+   * Registers a wildcard component callback on a message.
+   * This unregisters automatically when the context expires.
+   * @param message_id The message ID of the component to register
+   * @param callback The callback to use on interaction
+   * @param expiration The expiration time of the callback in milliseconds. Use null for no expiration (Although, in this case, global components might be more consistent).
+   * @param onExpired A function to be called when the component expires.
+   */
+  registerWildcardComponent(
+    message_id: string,
+    callback: ComponentRegisterCallback,
+    expiration: number = 1000 * 60 * 15,
+    onExpired?: () => void
+  ) {
+    if (this.expired) throw new Error('This interaction has expired');
+
+    this.creator._componentCallbacks.set(`${message_id}-*`, {
+      callback,
+      expires: expiration != null ? this.invokedAt + expiration : undefined,
+      onExpired
+    });
+
+    if (expiration != null && this.creator.options.componentTimeouts)
+      setTimeout(() => {
+        if (this.creator._componentCallbacks.has(`${message_id}-*`)) {
+          if (onExpired) onExpired();
+          this.creator._componentCallbacks.delete(`${message_id}-*`);
+        }
+      }, expiration);
+  }
+
+  /**
+   * Unregisters a component callback.
+   * @param message_id The message ID of the component to unregister, defaults to the invoking message ID.
+   */
+  unregisterWildcardComponent(message_id: string) {
+    return this.creator._componentCallbacks.delete(`${message_id}-*`);
+  }
 }
 
 /** The options for {@link MessageInteractionContext#edit}. */
@@ -314,30 +413,46 @@ export interface EditMessageOptions {
   embeds?: MessageEmbedOptions[];
   /** The mentions allowed to be used in this message. */
   allowedMentions?: MessageAllowedMentions;
-  /**
-   * The attachment(s) to send with the message.
-   * Note that ephemeral messages and initial messages cannot have
-   * attachments.
-   */
-  file?: MessageFile | MessageFile[];
+  /** The attachment(s) to send with the message. */
+  files?: MessageFile[];
   /** The components of the message. */
-  components?: ComponentActionRow[];
+  components?: AnyComponent[];
+  /** The flags to use in the message. */
+  flags?: number;
+  /** The attachment data of the message. */
+  attachments?: MessageAttachmentOptions[];
+  /** A poll. */
+  poll?: CreatePollOptions;
 }
 
 /** A file within {@link EditMessageOptions}. */
 export interface MessageFile {
   /** The attachment to send. */
-  file: Buffer;
+  file: any;
   /** The name of the file. */
   name: string;
+}
+
+/** A message attachment describing a file. */
+export interface MessageAttachmentOptions {
+  /** The name of the attachment. */
+  name?: string;
+  /** The ID of the attachment. For existing attachments, this must be the ID snowflake of the attachment, otherwise, this will be the index of the files being sent to Discord. */
+  id: string | number;
+  /** The title of the attachment. */
+  title?: string;
+  /** The description of the attachment. */
+  description?: string;
+  /** The duration, in seconds, of the voice message. */
+  duration_secs?: number;
+  /** A base64-encoded bytearray that represents a sampled waveform. */
+  waveform?: string;
 }
 
 /** The options for {@link MessageInteractionContext#send} and {@link MessageInteractionContext#sendFollowUp}. */
 export interface MessageOptions extends EditMessageOptions {
   /** Whether to use TTS for the content. */
   tts?: boolean;
-  /** The flags to use in the message. */
-  flags?: number;
   /**
    * Whether or not the message should be ephemeral.
    * Ignored if `flags` is defined.

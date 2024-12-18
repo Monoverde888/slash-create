@@ -1,5 +1,3 @@
-/* global BigInt */
-
 /** Data structure that makes it easy to interact with a bitfield. */
 export class BitField {
   /** Bitfield of the packed bits. */
@@ -8,14 +6,19 @@ export class BitField {
   static FLAGS: { [perm: string]: number | bigint } = {};
 
   /** @param bits Bit(s) to read from. */
-  constructor(bits: BitFieldResolvable = 0) {
+  constructor(bits: BitFieldResolvable = 0, useBigInt = false) {
     // @ts-ignore
-    this.bitfield = this.constructor.resolve(bits);
+    this.bitfield = this.constructor.resolve(bits, useBigInt);
   }
 
   /** @private */
   get defaultBit() {
     return typeof this.bitfield === 'bigint' ? 0n : 0;
+  }
+
+  /** @private */
+  get isBigInt() {
+    return typeof this.defaultBit === 'bigint';
   }
 
   /**
@@ -24,7 +27,7 @@ export class BitField {
    */
   any(bit: BitFieldResolvable): boolean {
     // @ts-ignore
-    return (this.bitfield & this.constructor.resolve(bit)) !== this.defaultBit;
+    return (this.bitfield & this.constructor.resolve(bit, this.isBigInt)) !== this.defaultBit;
   }
 
   /**
@@ -33,7 +36,7 @@ export class BitField {
    */
   equals(bit: BitFieldResolvable): boolean {
     // @ts-ignore
-    return this.bitfield === this.constructor.resolve(bit);
+    return this.bitfield === this.constructor.resolve(bit, this.isBigInt);
   }
 
   /**
@@ -43,7 +46,7 @@ export class BitField {
   has(bit: BitFieldResolvable): boolean {
     if (Array.isArray(bit)) return bit.every((p) => this.has(p));
     // @ts-ignore
-    bit = this.constructor.resolve(bit);
+    bit = this.constructor.resolve(bit, this.isBigInt);
     // @ts-ignore
     return (this.bitfield & bit) === bit;
   }
@@ -54,7 +57,7 @@ export class BitField {
    */
   missing(bits: BitFieldResolvable): string[] {
     // @ts-ignore
-    const bitsArray: string[] = new this.constructor(bits).toArray();
+    const bitsArray: string[] = new this.constructor(bits, this.isBigInt).toArray();
     return bitsArray.filter((p) => !this.has(p));
   }
 
@@ -102,8 +105,8 @@ export class BitField {
    * Resolves bitfields to their numeric form.
    * @param bit Bit(s) to resolve
    */
-  static resolve(bit?: BitFieldResolvable): number | bigint {
-    const defaultBit = this.name === 'Permissions' ? 0n : 0;
+  static resolve(bit?: BitFieldResolvable, useBigInt = false): number | bigint {
+    const defaultBit = useBigInt ? 0n : 0;
     if (typeof bit === 'undefined') return defaultBit;
 
     // Make sure bigint and numbers arent mixed
@@ -114,7 +117,7 @@ export class BitField {
     if (bit instanceof BitField) return bit.bitfield;
     if (Array.isArray(bit))
       return bit
-        .map((p) => this.resolve(p))
+        .map((p) => this.resolve(p, useBigInt))
         .reduce(<T extends number | bigint>(prev: T, p: T) => (prev as T) | (p as T), defaultBit);
     if (typeof bit === 'string' && typeof this.FLAGS[bit] !== 'undefined') return this.FLAGS[bit];
     throw new RangeError('BITFIELD_INVALID');

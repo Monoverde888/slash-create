@@ -24,9 +24,13 @@
       path: command.md
     - name: Message Components
       path: components.md
+    - name: Cloudflare Workers
+      path: cfworker.md
     - name: Google Cloud Functions
       path: gcf.md
     - name: AWS Lambda
       path: lambda.md
     - name: Azure Functions
       path: azure.md
+    - name: Vercel
+      path: vercel.md

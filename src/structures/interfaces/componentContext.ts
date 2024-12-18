@@ -1,12 +1,18 @@
-import { ComponentType, InteractionResponseType, MessageComponentRequestData } from '../../constants';
-import { MessageInteractionContext, EditMessageOptions } from './messageInteraction';
-import { SlashCreator } from '../../creator';
+import {
+  ComponentType,
+  InitialCallbackResponse,
+  InteractionResponseType,
+  MessageComponentRequestData
+} from '../../constants';
+import { EditMessageOptions } from './messageInteraction';
+import { BaseSlashCreator } from '../../creator';
 import { RespondFunction } from '../../server';
 import { Message } from '../message';
-import { formatAllowedMentions, FormattedAllowedMentions } from '../../util';
+import { convertCallbackResponse, formatAllowedMentions, FormattedAllowedMentions } from '../../util';
+import { ModalSendableContext } from './modalSendableContext';
 
 /** Represents an interaction context from a message component. */
-export class ComponentContext extends MessageInteractionContext {
+export class ComponentContext<ServerContext extends any = unknown> extends ModalSendableContext<ServerContext> {
   /** The request data. */
   readonly data: MessageComponentRequestData;
 
@@ -19,16 +25,21 @@ export class ComponentContext extends MessageInteractionContext {
   /** The message this interaction came from, will be partial for ephemeral messages. */
   readonly message: Message;
 
-  /** @hidden */
-  private _timeout?: any;
-
   /**
    * @param creator The instantiating creator.
    * @param data The interaction data for the context.
    * @param respond The response function for the interaction.
+   * @param useTimeout Whether to use the acknowledgement timeout.
+   * @param serverContext The context of the server.
    */
-  constructor(creator: SlashCreator, data: MessageComponentRequestData, respond: RespondFunction) {
-    super(creator, data, respond);
+  constructor(
+    creator: BaseSlashCreator,
+    data: MessageComponentRequestData,
+    respond: RespondFunction,
+    useTimeout = true,
+    serverContext: ServerContext
+  ) {
+    super(creator, data, respond, serverContext);
     this.data = data;
 
     this.customID = data.data.custom_id;
@@ -37,25 +48,24 @@ export class ComponentContext extends MessageInteractionContext {
     this.message = new Message(data.message, creator, this);
 
     // Auto-acknowledge if no response was given in 2 seconds
-    this._timeout = setTimeout(() => this.acknowledge(), 2000);
+    if (useTimeout) this._timeout = setTimeout(() => this.acknowledge(), 2000);
   }
 
   /**
    * Acknowledges the interaction without replying.
-   * @returns Whether the acknowledgement passed passed
+   * @returns Whether the acknowledgement passed or the callback response if available
    */
-  async acknowledge(): Promise<boolean> {
+  async acknowledge(): Promise<boolean | InitialCallbackResponse> {
     if (!this.initiallyResponded) {
       this.initiallyResponded = true;
       clearTimeout(this._timeout);
-      // @ts-expect-error
-      await this._respond({
+      const response = await this._respond({
         status: 200,
         body: {
           type: InteractionResponseType.DEFERRED_UPDATE_MESSAGE
         }
       });
-      return true;
+      return response ? convertCallbackResponse(response, this) : true;
     }
 
     return false;
@@ -63,21 +73,16 @@ export class ComponentContext extends MessageInteractionContext {
 
   /**
    * Edits the message that the component interaction came from.
-   * This will return a boolean if it's an initial response, otherwise a {@link Message} will be returned.
+   * This will return `true` or a {@link InitialCallbackResponse} if it's an initial response, otherwise a {@link Message} will be returned.
    * @param content The content of the message
-   * @param options The message options
+   * @returns `true` or a {@link InitialCallbackResponse} if the initial response passed, otherwise a {@link Message} of the parent message.
    */
-  async editParent(content: string | EditMessageOptions, options?: EditMessageOptions): Promise<boolean | Message> {
+  async editParent(content: string | EditMessageOptions): Promise<boolean | InitialCallbackResponse | Message> {
     if (this.expired) throw new Error('This interaction has expired');
 
-    if (typeof content !== 'string') options = content;
-    else if (typeof options !== 'object') options = {};
-
+    const options = typeof content === 'string' ? { content } : content;
     if (typeof options !== 'object') throw new Error('Message options is not an object.');
-
-    if (!options.content && typeof content === 'string') options.content = content;
-
-    if (!options.content && !options.embeds && !options.allowedMentions)
+    if (!options.content && !options.embeds && !options.components && !options.files && !options.attachments)
       throw new Error('No valid options were given.');
 
     const allowedMentions = options.allowedMentions
@@ -87,8 +92,7 @@ export class ComponentContext extends MessageInteractionContext {
     if (!this.initiallyResponded) {
       this.initiallyResponded = true;
       clearTimeout(this._timeout);
-      // @ts-expect-error
-      await this._respond({
+      const response = await this._respond({
         status: 200,
         body: {
           type: InteractionResponseType.UPDATE_MESSAGE,
@@ -98,9 +102,10 @@ export class ComponentContext extends MessageInteractionContext {
             allowed_mentions: allowedMentions,
             components: options.components
           }
-        }
+        },
+        files: options.files
       });
-      return true;
-    } else return this.edit(this.message.id, content, options);
+      return response ? convertCallbackResponse(response, this) : true;
+    } else return this.edit(this.message.id, content);
   }
 }

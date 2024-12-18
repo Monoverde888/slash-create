@@ -16,22 +16,30 @@ on:
 jobs:
   docs:
     name: Documentation
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Setup Node 12.x
-        uses: actions/setup-node@v1
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        id: pnpm-install
         with:
-          node-version: 12.x
+          version: 9
+          run_install: false
+
+      - name: Install Node v18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.x
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build documentation
-        run: npm run docs
+        run: pnpm run docs
 
       - name: Deploy documentation
         uses: dbots-pkg/action-docs@v1
@@ -39,7 +47,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update docs in repo
-        uses: EndBug/add-and-commit@v4
+        uses: EndBug/add-and-commit@v9
         with:
           add: docs/*.md
           message: 'chore(docs): auto-update docs'

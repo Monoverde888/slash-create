@@ -1,3 +1,5 @@
+<warn>This is example was created in slash-create v5, things may not work properly.  Join the Discord Server if this example has issues.</warn>
+
 ### Minimal Setup Example
 
 1. Login to the [AWS Management Console](https://console.aws.amazon.com/).
@@ -15,12 +17,13 @@ const creator = new SlashCreator({
     token: process.env.DISCORD_BOT_TOKEN
 });
 
-creator
-    // The first argument is required, the second argument is the name or "target" of the export.
-    // It defaults to 'interactions', so it would not be strictly necessary here.
-    .withServer(new AWSLambdaServer(module.exports, 'interactions'))
-    .registerCommandsIn(path.join(__dirname, 'commands'))
-    .syncCommands();
+// The first argument is required, the second argument is the name or "target" of the export.
+// It defaults to 'interactions', so it would not be strictly necessary here.
+creator.withServer(new AWSLambdaServer(module.exports, 'interactions'))
+
+await creator.registerCommandsIn(path.join(__dirname, 'commands'));
+
+await creator.syncCommands();
 ```
 
 5. Make sure to create some example commands in the *commands* directory.
@@ -51,3 +54,9 @@ upload.zip
 ### Additional notes
 - Please note that **syncing your commands in the Lambda handler is not recommended** because AWS will destroy and recreate your execution environment as needed, which could lead to a lot of unnecessary requests to the Discord API.
   - A more efficient approach would be to create a separate function for syncing the commands and removing `syncCommands()` from the handler.
+- Unlike when running a bot user, AWS Lambda and other endpoint webhooks use a traditional HTTP request/response architecture.
+  - This means you only have the ability to send a single response (`.defer()` or `.send()`) for each incoming interaction.
+  - For the same reason, a `.defer()` will not be actually sent until the lambda terminates, so you shouldn't perform a long-running operation after you `.defer()`.
+  - If you need to defer and *then* send a follow-up, you will have call `.defer()`, and then trigger some sort of side effect that calls one of the non-response methods such as `.sendFollowUp()` **from another source**.
+  - For example, with Lambda, you will likely need to invoke a second, different lambda, pass it a payload that includes the interaction you're handling, and then call `.defer()`.
+  - This second lambda can then perform a long-running query and then call `.sendFollowUp()`

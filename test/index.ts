@@ -13,11 +13,16 @@ describe('[index]', () => {
     expect(slashCreate.Command).to.be.a('function');
     expect(slashCreate.CommandContext).to.be.a('function');
     expect(slashCreate.ComponentContext).to.be.a('function');
+    expect(slashCreate.CloudflareWorkerServer).to.be.a('function');
     expect(slashCreate.MessageInteractionContext).to.be.a('function');
+    expect(slashCreate.ModalInteractionContext).to.be.a('function');
+    expect(slashCreate.ModalSendableContext).to.be.a('function');
     expect(slashCreate.ApplicationCommandType).to.be.a('object');
     expect(slashCreate.ApplicationCommandPermissionType).to.be.a('object');
     expect(slashCreate.CommandOptionType).to.be.a('object');
     expect(slashCreate.ComponentType).to.be.a('object');
+    expect(slashCreate.TextInputStyle).to.be.a('object');
+    expect(slashCreate.ButtonStyle).to.be.a('object');
     expect(slashCreate.Constants).to.be.a('object');
     expect(slashCreate.Context).to.be.a('function');
     expect(slashCreate.Creator).to.be.a('function');
@@ -34,8 +39,6 @@ describe('[index]', () => {
     expect(slashCreate.Member).to.be.a('function');
     expect(slashCreate.Message).to.be.a('function');
     expect(slashCreate.Permissions).to.be.a('function');
-    expect(slashCreate.RequestHandler).to.be.a('function');
-    expect(slashCreate.SequentialBucket).to.be.a('function');
     expect(slashCreate.Server).to.be.a('function');
     expect(slashCreate.SlashCommand).to.be.a('function');
     expect(slashCreate.SlashCreator).to.be.a('function');

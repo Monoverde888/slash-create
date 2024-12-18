@@ -1,8 +1,9 @@
 import nock from 'nock';
-import { API_BASE_URL, ApplicationCommand, Endpoints, GuildApplicationCommandPermissions } from '../../src/constants';
+import { API_VERSION, ApplicationCommand, Endpoints } from '../../src/constants';
 import { MOCK_TOKEN } from './constants';
 
 const DISCORD_URL = 'https://discord.com';
+const API_BASE_URL = '/api/v' + API_VERSION;
 
 const NOCK_HEADERS = {
   'Content-Type': 'application/json',
@@ -15,9 +16,9 @@ const NOCK_HEADERS = {
 };
 
 // #region Global commands
-export const globalCommands = (commands: ApplicationCommand[] = []) =>
+export const globalCommands = (commands: ApplicationCommand[] = [], withLocalizations = true) =>
   nock(DISCORD_URL)
-    .get(API_BASE_URL + Endpoints.COMMANDS('1'))
+    .get(API_BASE_URL + Endpoints.COMMANDS('1') + (withLocalizations ? '?with_localizations=true' : ''))
     .reply(200, commands, NOCK_HEADERS);
 
 export const newGlobalCommand = (command: ApplicationCommand) =>
@@ -44,7 +45,7 @@ export const deleteGlobalCommand = (id: string) =>
 // #region Guild commands
 export const guildCommands = (commands: ApplicationCommand[] = []) =>
   nock(DISCORD_URL)
-    .get(API_BASE_URL + Endpoints.GUILD_COMMANDS('1', '123'))
+    .get(API_BASE_URL + Endpoints.GUILD_COMMANDS('1', '123') + '?with_localizations=true')
     .reply(200, commands, NOCK_HEADERS);
 
 export const newGuildCommand = (command: ApplicationCommand) =>
@@ -66,18 +67,6 @@ export const deleteGuildCommand = (id: string) =>
   nock(DISCORD_URL)
     .delete(API_BASE_URL + Endpoints.GUILD_COMMAND('1', '123', id))
     .reply(204, undefined, NOCK_HEADERS);
-// #endregion
-
-// #region Command Permissions
-export const guildCommandPermissions = (commands: GuildApplicationCommandPermissions[] = []) =>
-  nock(DISCORD_URL)
-    .get(API_BASE_URL + Endpoints.GUILD_COMMAND_PERMISSIONS('1', '123'))
-    .reply(200, commands, NOCK_HEADERS);
-
-export const updateGuildCommandPermissions = (commands: GuildApplicationCommandPermissions[] = []) =>
-  nock(DISCORD_URL)
-    .put(API_BASE_URL + Endpoints.GUILD_COMMAND_PERMISSIONS('1', '123'))
-    .reply(200, commands, NOCK_HEADERS);
 // #endregion
 
 // #region Interactions

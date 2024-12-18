@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
-import { AnyRequestData } from './constants';
+import { AnyRequestData, InteractionCallbackResponse } from './constants';
+import type { FileContent } from './rest/requestHandler';
 
 /**
  * The base Server for {@link SlashCreator}.
@@ -60,6 +61,8 @@ export interface TransformedRequest {
   request: any;
   /** The response class from a Server, depending on what server it is. */
   response: any;
+  /** The raw string of the body. */
+  rawBody?: string;
 }
 
 /**
@@ -73,19 +76,25 @@ export interface Response {
   headers?: { [key: string]: string | string[] | undefined };
   /** The body of the response. */
   body?: any;
+  /** The files of the response. */
+  files?: FileContent[];
 }
 
 /**
  * The response function for a {@link Server}.
  * @private
  */
-export type RespondFunction = (response: Response) => Promise<void>;
+export type RespondFunction = (response: Response) => Promise<InteractionCallbackResponse | void>;
 
 /**
  * The handler for pushing requests to a {@link SlashCreator}.
  * @private
  */
-export type ServerRequestHandler = (treq: TransformedRequest, respond: RespondFunction) => void;
+export type ServerRequestHandler<ServerContext extends any = unknown> = (
+  treq: TransformedRequest,
+  respond: RespondFunction,
+  serverContext?: ServerContext
+) => Promise<void>;
 
 /**
  * The handler for pushing interaction events to a {@link SlashCreator}.

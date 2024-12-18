@@ -1,36 +1,18 @@
-import { ApplicationCommandOption, CommandOptionType } from './constants';
-import nacl from 'tweetnacl';
-/**
- * Validates a payload from Discord against its signature and key.
- *
- * @param rawBody - The raw payload data
- * @param signature - The signature from the `X-Signature-Ed25519` header
- * @param timestamp - The timestamp from the `X-Signature-Timestamp` header
- * @param clientPublicKey - The public key from the Discord developer dashboard
- * @returns Whether or not validation was successful
- */
-export async function verifyKey(
-  body: string,
-  signature: string,
-  timestamp: string,
-  clientPublicKey: string
-): Promise<boolean> {
-  try {
-    return nacl.sign.detached.verify(
-      Buffer.from(timestamp + body),
-      Buffer.from(signature, 'hex'),
-      Buffer.from(clientPublicKey, 'hex')
-    );
-  } catch {
-    return false;
-  }
-}
+import {
+  ApplicationCommandOption,
+  CommandOptionType,
+  InitialCallbackResponse,
+  InteractionCallbackResponse
+} from './constants';
+import { MessageInteractionContext } from './structures/interfaces/messageInteraction';
+import { BaseInteractionContext, Message } from './web';
 
 export function formatAllowedMentions(
-  allowed: MessageAllowedMentions,
+  allowed: MessageAllowedMentions | FormattedAllowedMentions,
   defaultMentions?: FormattedAllowedMentions
 ): FormattedAllowedMentions {
   if (!allowed && defaultMentions) return defaultMentions;
+  if ('parse' in allowed) return allowed as FormattedAllowedMentions;
   const result: FormattedAllowedMentions = {
     parse: []
   };
@@ -53,8 +35,16 @@ export function formatAllowedMentions(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function oneLine(strings: TemplateStringsArray, ..._: any[]) {
-  return strings[0].replace(/(?:\n(?:\s*))+/g, ' ').trim();
+export function oneLine(strings: string | TemplateStringsArray, ..._: any[]) {
+  const l = arguments.length;
+  const substitutions = Array(l > 1 ? l - 1 : 0);
+  for (let k = 1; k < l; k++) substitutions[k - 1] = arguments[k];
+
+  if (typeof strings === 'string') return strings.replace(/(?:\n(?:\s*))+/g, ' ').trim();
+  return strings
+    .reduce((res, p) => ''.concat(res, substitutions.shift(), p))
+    .replace(/(?:\n(?:\s*))+/g, ' ')
+    .trim();
 }
 
 export function validateOptions(options: ApplicationCommandOption[], prefix = 'options') {
@@ -116,6 +106,61 @@ export function validateOptions(options: ApplicationCommandOption[], prefix = 'o
   }
 }
 
+export function generateID() {
+  return (Date.now() + Math.round(Math.random() * 1000)).toString(36);
+}
+
+export function convertCallbackResponse(
+  response: InteractionCallbackResponse,
+  ctx: BaseInteractionContext
+): InitialCallbackResponse {
+  const result: InitialCallbackResponse = {
+    interaction: {
+      id: response.interaction.id,
+      type: response.interaction.type,
+      activityInstanceID: response.interaction.activity_instance_id,
+      responseMessageID: response.interaction.response_message_id,
+      responseMessageLoading: response.interaction.response_message_loading,
+      responseMessageEphemeral: response.interaction.response_message_ephemeral
+    }
+  };
+
+  const isMessageCtx = ctx instanceof MessageInteractionContext;
+
+  if (response.interaction.response_message_id && isMessageCtx)
+    ctx.messageID = response.interaction.response_message_id;
+
+  if (response.resource) {
+    result.resource = {
+      type: response.resource.type
+    };
+
+    if (response.resource.activity_instance)
+      result.resource.activityInstance = { id: response.resource.activity_instance.id };
+
+    if (response.resource.message)
+      result.resource.message = new Message(response.resource.message, ctx.creator, isMessageCtx ? ctx : undefined);
+  }
+
+  return result;
+}
+
+/**
+ * Calculates the timestamp in milliseconds associated with a Discord ID/snowflake
+ * @param id The ID of a structure
+ */
+export function getCreatedAt(id: string) {
+  return getDiscordEpoch(id) + 1420070400000;
+}
+
+/**
+ * Gets the number of milliseconds since epoch represented by an ID/snowflake
+ * @param id The ID of a structure
+ */
+export function getDiscordEpoch(id: string) {
+  return Math.floor(Math.floor(Number(BigInt(id) / 4194304n)));
+}
+
 /** The allowed mentions for a {@link Message}. */
 export interface MessageAllowedMentions {
   everyone: boolean;
@@ -132,3 +177,6 @@ export interface FormattedAllowedMentions {
   roles?: string[];
   users?: string[];
 }
+
+/** @hidden */
+export type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
